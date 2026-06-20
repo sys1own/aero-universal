@@ -1031,6 +1031,74 @@ def runtime_command(args: argparse.Namespace) -> int:
     return 0 if metrics.success else 1
 
 
+def scaffold_command(args: argparse.Namespace) -> int:
+    """Generate a complete, out-of-tree standalone repo from a source entry.
+
+    Resolves --source-entry from anywhere on the filesystem, shields rug/pyo3
+    sources with the codified compatibility fixes, and writes a turn-key
+    Cargo project (Cargo.toml / src/lib.rs / .gitignore / README.md /
+    test_binding.py) into a temp dir or the given --distribution-directory --
+    never touching the aero-universal tree.  With --build, compiles it via cargo
+    (from the generated repo) using the diagnostic-recovery retry loop.
+    """
+    from src.scaffold import ScaffoldEngine
+    from src.scaffold.source_resolver import SourceEntryNotFound
+    from src.scaffold.workspace import WorkspaceLocationError
+
+    verbose = bool(getattr(args, "verbose", False))
+    engine = ScaffoldEngine(logger=lambda m: print(f"  [scaffold] {m}"), verbose=verbose)
+
+    deps = _parse_dep_overrides(getattr(args, "dep", None))
+    print(f"\nScaffolding standalone repository from: {args.source_entry}")
+    try:
+        result = engine.scaffold(
+            source_entry=args.source_entry,
+            name=args.name,
+            distribution_directory=args.distribution_directory,
+            dependencies=deps or None,
+            build=bool(getattr(args, "build", False)),
+            keep=True if args.distribution_directory else not getattr(args, "no_keep", False),
+        )
+    except SourceEntryNotFound as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except WorkspaceLocationError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
+    repo = result.repo
+    shield = result.shield
+    print("\nStandalone repository generated:")
+    print(f"  location         : {result.workspace}  (out-of-tree)")
+    print(f"  crate            : {repo['spec']['name']}  v{repo['spec']['version']}")
+    print(f"  dependencies     : {', '.join(repo['spec']['dependencies']) or '(none)'}")
+    print(f"  crate-type       : {repo['spec']['crate_type']}")
+    if repo['spec'].get('python_module'):
+        print(f"  python module    : {repo['spec']['python_module']}")
+    print(f"  files written    : {', '.join(repo['files'])}")
+    if shield['anchors']:
+        applied = ', '.join(shield['applied']) or '(already compatible)'
+        print(f"  semantic shields : anchors={shield['anchors']} -> {applied}")
+    if result.build is not None:
+        build = result.build
+        status = "succeeded" if build["succeeded"] else "failed"
+        note = " (recovered after auto-correction)" if build.get("recovered") else ""
+        print(f"  build            : {status}{note} in {len(build['attempts'])} attempt(s)")
+    print(f"\n  Push it as-is:  cd {result.workspace} && git init && git add . && git commit -m 'init'")
+    return 0 if (result.build is None or result.build["succeeded"]) else 1
+
+
+def _parse_dep_overrides(entries) -> dict:
+    """Parse repeated --dep name=version flags into a {name: version} dict."""
+    deps: dict = {}
+    for entry in entries or []:
+        if "=" in entry:
+            name, _, version = entry.partition("=")
+            if name.strip():
+                deps[name.strip()] = version.strip()
+    return deps
+
+
 # ------------------------------------------------------------------
 # Parser
 # ------------------------------------------------------------------
@@ -1185,6 +1253,28 @@ def create_parser() -> argparse.ArgumentParser:
     runtime_parser.add_argument("--workspace", default=".", help="Project root")
     runtime_parser.add_argument("--config", default=None, help="Path to blueprint_config.json")
     runtime_parser.set_defaults(handler=runtime_command)
+
+    # --- scaffold (out-of-tree standalone repo generator) ---
+    scaffold_parser = subparsers.add_parser(
+        "scaffold", help="Generate a turn-key standalone repo from a source file (out-of-tree)"
+    )
+    scaffold_parser.add_argument(
+        "--source-entry", required=True,
+        help="Path to the source file, from anywhere (e.g. /content/lib.rs, ../data/core.rs)",
+    )
+    scaffold_parser.add_argument("--name", default=None, help="Crate/repo name (default: inferred from the file)")
+    scaffold_parser.add_argument(
+        "--distribution-directory", default=None,
+        help="Where to write the repo (default: a temp dir outside the tool tree)",
+    )
+    scaffold_parser.add_argument(
+        "--dep", action="append", default=None,
+        help="Override/add a dependency: --dep rug=1.24 (repeatable)",
+    )
+    scaffold_parser.add_argument("--build", action="store_true", help="Also compile the repo via cargo (with recovery)")
+    scaffold_parser.add_argument("--no-keep", action="store_true", help="Delete the temp workspace afterwards")
+    scaffold_parser.add_argument("--verbose", action="store_true", help="Print each scaffolding step")
+    scaffold_parser.set_defaults(handler=scaffold_command)
 
     return parser
 
