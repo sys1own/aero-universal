@@ -67,6 +67,13 @@ SCHEMAS: Dict[str, BlockSchema] = {
             "defines": _STRING_LIST,
             "output": _STRING,
             "optional": _BOOL,
+            # Rust/Cargo: build a crate that lives in a subdirectory and/or has
+            # its own committed manifest (see README "Rust / Cargo support").
+            "manifest_path": _STRING,
+            "root": _STRING,
+            # Pin dependency versions for a synthesised manifest, as a flat list
+            # of "name=version" entries, e.g. cargo_dependencies = ["rug=0.22"].
+            "cargo_dependencies": _STRING_LIST,
         },
         required=("language", "sources"),
     ),

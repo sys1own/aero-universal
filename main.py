@@ -191,6 +191,14 @@ def _build_dsl_targets(
         defines = meta.get("defines", [])
         optional = meta.get("optional", False)
 
+        # Backend-specific options (e.g. Rust manifest_path / root / cargo deps).
+        options = {
+            "manifest_path": meta.get("manifest_path"),
+            "root": meta.get("root"),
+            "cargo": meta.get("cargo"),
+            "cargo_dependencies": meta.get("cargo_dependencies"),
+        }
+
         ui.compiling(name, language)
         result = compile_target(
             target_name=name,
@@ -200,6 +208,7 @@ def _build_dsl_targets(
             flags=flags,
             defines=defines,
             workdir=workspace,
+            options=options,
         )
         results.append(result)
 

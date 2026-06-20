@@ -38,6 +38,11 @@ class TargetNode:
     defines: List[str] = field(default_factory=list)
     output: Optional[str] = None
     optional: bool = False
+    # Rust/Cargo: point at a crate in a subdirectory and/or an explicit manifest.
+    manifest_path: Optional[str] = None
+    root: Optional[str] = None
+    # Pin dependency versions for a synthesised manifest ("name=version" entries).
+    cargo_dependencies: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -54,6 +59,12 @@ class TargetNode:
             d["output"] = self.output
         if self.optional:
             d["optional"] = True
+        if self.manifest_path:
+            d["manifest_path"] = self.manifest_path
+        if self.root:
+            d["root"] = self.root
+        if self.cargo_dependencies:
+            d["cargo_dependencies"] = self.cargo_dependencies
         return d
 
 
@@ -274,6 +285,9 @@ def blueprint_to_dag(blueprint: Blueprint) -> BuildGraph:
             defines=_extract_string_list(block, "defines"),
             output=_extract_string(block, "output") or None,
             optional=_extract_bool(block, "optional"),
+            manifest_path=_extract_string(block, "manifest_path") or None,
+            root=_extract_string(block, "root") or None,
+            cargo_dependencies=_extract_string_list(block, "cargo_dependencies"),
         )
         targets[node.name] = node
         dep_map[node.name] = requires

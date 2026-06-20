@@ -302,7 +302,8 @@ target "bindings" {
 
 **Validation rules.** Exactly one `project` block; at least one `target`; only
 known keys per block (`target`: `language`, `sources`, `requires`, `flags`,
-`defines`, `output`, `optional`); required keys present (`project.version`,
+`defines`, `output`, `optional`, and the Rust/Cargo keys `manifest_path`,
+`root`, `cargo_dependencies`); required keys present (`project.version`,
 `target.language`, `target.sources`); `language` ∈ `{c, cpp, fortran, python,
 rust}`; unique target names; every `requires` entry must reference a real
 target; and the `requires` graph must be **acyclic**.
@@ -328,6 +329,81 @@ error: unterminated string literal
 ```
 
 See [`blueprint.aero.sample`](blueprint.aero.sample) for a complete example.
+
+### Rust / Cargo support
+
+Aero respects user‑provided Cargo manifests and supports crates that live in
+subdirectories. The behaviour for a `language = "rust"` target is:
+
+1. **An existing `Cargo.toml` is used verbatim.** If the crate root already has a
+   `Cargo.toml` — discovered from the target's `sources`, or pointed at via
+   `manifest_path` / `root` — Aero builds against it **as‑is** and never
+   synthesises or overwrites it. Builds that pin older dependency APIs keep
+   working.
+2. **Otherwise a manifest is synthesised**, and you can pin dependency versions
+   from the blueprint (see `cargo_dependencies` / the JSON `cargo` block below).
+3. **`cargo` runs from the resolved crate root**, and artefacts are collected
+   from *that* crate's `target/` directory.
+
+**New target fields:**
+
+| Field | Format | Meaning |
+|-------|--------|---------|
+| `root` | string | Subdirectory that is the crate root (e.g. `"crates/foo"`). |
+| `manifest_path` | string | Explicit path to a `Cargo.toml` (or the directory containing it). Its directory becomes the crate root. |
+| `cargo_dependencies` | list of `"name=version"` | Pin dependency versions for a **synthesised** manifest (block‑DSL / INI form). |
+
+**Block DSL — a crate in a subdirectory with its own committed manifest:**
+
+```aero
+target "engine" {
+    language = "rust"
+    sources  = ["crates/engine/src/lib.rs"]
+    root     = "crates/engine"          # cargo runs here; its Cargo.toml is honoured
+}
+```
+
+**Block DSL — no manifest yet, pin versions for the synthesised one:**
+
+```aero
+target "math" {
+    language           = "rust"
+    sources            = ["src/lib.rs"]
+    cargo_dependencies = ["rug=0.22", "serde=1.0"]
+}
+```
+
+**Richer nested `cargo` block (target metadata).** The Rust backend also accepts
+a nested `cargo` object on a target's metadata, supporting inline‑table specs
+(features), an explicit `edition`, and `crate_type`. This is the form consumed
+by the compiler backend (`src/build/compilers.py`) and is convenient for JSON
+target metadata or programmatic callers of `compile_target(...)`:
+
+```json
+{
+  "name": "engine",
+  "language": "rust",
+  "sources": ["crates/engine/src/lib.rs"],
+  "root": "crates/engine",
+  "cargo": {
+    "edition": "2021",
+    "dependencies": {
+      "rug": "0.22",
+      "serde": { "version": "1.0", "features": ["derive"] }
+    }
+  }
+}
+```
+
+Both forms feed the same place: `cargo.dependencies` (nested) and
+`cargo_dependencies` (flat `"name=version"` list) are merged into the
+synthesised manifest's `[dependencies]`. Neither is consulted when a
+`Cargo.toml` already exists — that manifest always wins.
+
+> Precedence for the crate root: `manifest_path` → `root` → an existing
+> `Cargo.toml` found above the sources → the source directory (its parent if the
+> sources sit in `src/`) → the workspace root. A synthesised manifest carries a
+> header noting that committing your own `Cargo.toml` gives you full control.
 
 ### INI Format (Legacy)
 
