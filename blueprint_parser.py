@@ -702,6 +702,47 @@ def _parse_lean_blueprint(content: str, project_root: str) -> Dict[str, Any]:
     return InvisibleConfigEngine(Path(project_root)).build_context_from_source(content)
 
 
+def parse_dsl_blueprint(content: str, filename: str = "blueprint.aero") -> Dict[str, Any]:
+    """Parse a block-DSL ``blueprint.aero`` and return a normalized ``build_context``.
+
+    Validation errors are raised (via :mod:`blueprint_lang`) so misconfigured
+    DSL blueprints get clear diagnostics rather than a silent fallback.
+    """
+    import blueprint_lang
+    from build_graph import blueprint_to_dag
+
+    blueprint = blueprint_lang.load_source(content, filename)
+    graph = blueprint_to_dag(blueprint)
+    context = graph.to_build_context()
+
+    context["workspace_status"] = "stable_active"
+    context["blueprint_format"] = "dsl"
+    context["timestamp"] = time.time()
+    context["active_optimizer_flags"] = {
+        "profile_guided_optimization": "enabled_strict",
+        "tier_shifting_hotness_threshold": 100,
+        "hotspot_loop_unroll_depth": 32,
+        "aot_boundary_check_elimination": True,
+        "vector_intrinsics_auto_generation": True,
+        "consensus_protocol": "raft_driven_mutation_lock",
+        "mutation_entropy_clamp_threshold": 0.05,
+    }
+    context["environment_targets"] = {
+        "execution_mode": "lock_free_polling_wheel_realtime",
+        "core_affinity_mask": "0xFFFF",
+        "numa_node_locality_binding": True,
+        "inter_core_ring_buffer_capacity": 262144,
+    }
+    context["resource_metrics"] = {
+        "pipeline_budget_seconds": 120.0,
+        "max_memory_mb": 2048,
+        "elapsed_seconds": {target: 0.0 for target in context["compilation_targets"]},
+    }
+    context["node_configurations"] = {}
+    context.update(_default_optional_sections())
+    return context
+
+
 def parse_blueprint(blueprint_path: str, manifest_path: str = _MANIFEST_PATH) -> Dict[str, Any]:
     """Load blueprint.aero, validate it, and generate a normalized build_context."""
     stable_manifest = load_stable_manifest(manifest_path)
@@ -731,6 +772,12 @@ def parse_blueprint(blueprint_path: str, manifest_path: str = _MANIFEST_PATH) ->
     # behaviour for backward compatibility.
     if looks_like_json(content):
         return parse_json_blueprint(content)
+
+    # Block-DSL blueprints are parsed/validated via blueprint_lang and
+    # converted into the engine's build_context via build_graph.
+    import blueprint_lang
+    if blueprint_lang.looks_like_blueprint_dsl(content):
+        return parse_dsl_blueprint(content, blueprint_path)
 
     try:
         sections, dependencies = parse_blueprint_content(content)

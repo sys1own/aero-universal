@@ -23,6 +23,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from src.utils.serialization import dataclass_to_dict
+
 
 @dataclass
 class PrecisionRecommendation:
@@ -33,13 +35,7 @@ class PrecisionRecommendation:
     reason: str
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "location": self.location,
-            "zone": self.zone,
-            "current": self.current,
-            "recommended": self.recommended,
-            "reason": self.reason,
-        }
+        return dataclass_to_dict(self)
 
 
 # Heuristic signals that an operation benefits from higher precision.

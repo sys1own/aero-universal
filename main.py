@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
 import orchestrator
+
+logger = logging.getLogger("aero.main")
 
 _BLUEPRINT_CONFIG = Path(__file__).resolve().parent / "blueprint_config.json"
 
@@ -40,7 +43,8 @@ def _strict_blueprint_gate(workspace: Path) -> Optional[int]:
         return None
     try:
         source = bp_path.read_text(encoding="utf-8")
-    except OSError:
+    except OSError as exc:
+        logger.warning("Cannot read blueprint file %s: %s", bp_path, exc)
         return None
     if not blueprint_lang.looks_like_blueprint_dsl(source):
         return None
@@ -57,9 +61,16 @@ def _strict_blueprint_gate(workspace: Path) -> Optional[int]:
 
 def build_command(args: argparse.Namespace) -> int:
     import blueprint_parser
+    from aero_ui import AeroUI
+    from error_interceptor import handle_compile_results
 
+    ui = AeroUI()
     orchestrator.configure_logging(verbose=args.verbose)
     workspace = Path(args.workspace).resolve()
+    bp_path = workspace / "blueprint.aero"
+
+    # Phase 1: Parsing
+    ui.parsing(str(bp_path))
 
     # Strict syntax/validation gate -- runs BEFORE any build step so a broken
     # block-format blueprint aborts immediately with a clear diagnostic.
@@ -67,7 +78,16 @@ def build_command(args: argparse.Namespace) -> int:
     if gate is not None:
         return gate
 
-    context = blueprint_parser.parse_blueprint(str(workspace / "blueprint.aero"))
+    context = blueprint_parser.parse_blueprint(str(bp_path))
+
+    # Phase 2: Validating
+    targets = context.get("compilation_targets", [])
+    is_dsl = context.get("blueprint_format") == "dsl"
+    ui.validating(len(targets))
+
+    # If DSL format, resolve the build graph and compile targets.
+    if is_dsl and not getattr(args, "validation_only", False):
+        return _build_dsl_targets(context, workspace, ui, args)
 
     # --validation-only: skip the build entirely and just run the suite.
     if getattr(args, "validation_only", False):
@@ -90,13 +110,13 @@ def build_command(args: argparse.Namespace) -> int:
         ran_on_cluster = _maybe_submit_hpc_build(context, workspace, args)
 
     if not ran_on_cluster:
+        ui.tag("Compiling", f"{len(targets)} target(s) via orchestrator")
         metadata = orchestrator.run_build(
             workspace_root=str(workspace),
             cycles=args.cycles,
             telemetry_interval=args.telemetry_interval,
         )
-        print()
-        print("Build completed successfully.")
+        ui.success()
         print(f"Manifest: {metadata.get('manifest_path')}")
         for asset in metadata.get("applied_assets", []):
             print(f"Updated asset: {asset}")
@@ -119,6 +139,87 @@ def build_command(args: argparse.Namespace) -> int:
     return _run_validation_stage(context, workspace)
 
 
+def _build_dsl_targets(
+    context: dict,
+    workspace: Path,
+    ui: "AeroUI",
+    args: argparse.Namespace,
+) -> int:
+    """Compile DSL blueprint targets using the compiler wrappers."""
+    from error_interceptor import handle_compile_results
+    from src.build.compilers import CompileResult, compile_target
+
+    graph = context.get("graph", {})
+    target_metadata = graph.get("target_metadata", [])
+    build_order = graph.get("targets", [])
+    dep_map = graph.get("dependencies", {})
+
+    # Phase 3: Resolving
+    # Compute parallel stages for display
+    from build_graph import BuildGraph, TargetNode
+
+    target_nodes = {}
+    for m in target_metadata:
+        target_nodes[m["name"]] = TargetNode(
+            name=m["name"],
+            language=m.get("language", ""),
+            sources=m.get("sources", []),
+            requires=m.get("requires", []),
+            flags=m.get("flags", []),
+            defines=m.get("defines", []),
+            output=m.get("output"),
+            optional=m.get("optional", False),
+        )
+    bg = BuildGraph(
+        targets=target_nodes,
+        dependency_map=dep_map,
+        build_order=build_order,
+    )
+    stage_count = len(bg.levels)
+    ui.resolving(len(build_order), stage_count)
+
+    # Phase 4: Compiling each target
+    results: list[CompileResult] = []
+    meta_by_name = {m["name"]: m for m in target_metadata}
+
+    for name in build_order:
+        meta = meta_by_name.get(name, {})
+        language = meta.get("language", "")
+        sources = meta.get("sources", [])
+        output = meta.get("output")
+        flags = meta.get("flags", [])
+        defines = meta.get("defines", [])
+        optional = meta.get("optional", False)
+
+        ui.compiling(name, language)
+        result = compile_target(
+            target_name=name,
+            language=language,
+            sources=sources,
+            output=output,
+            flags=flags,
+            defines=defines,
+            workdir=workspace,
+        )
+        results.append(result)
+
+        if result.success:
+            ui.compiled(name, language)
+        elif optional:
+            ui.skipped(name, "(optional, compiler unavailable)")
+        else:
+            ui.compile_error(name, result.error_summary)
+
+    # Phase 5: Report
+    exit_code = handle_compile_results(
+        [r for r in results if not meta_by_name.get(r.target_name, {}).get("optional", False) or not r.success],
+        ui,
+    )
+    if exit_code == 0:
+        ui.success()
+    return exit_code
+
+
 def _workspace_json_config(workspace: Path) -> dict:
     """Load ``blueprint_config.json`` from the workspace if present, else {}."""
     path = workspace / "blueprint_config.json"
@@ -126,7 +227,11 @@ def _workspace_json_config(workspace: Path) -> dict:
         return {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError as exc:
+        logger.debug("Cannot read workspace config %s: %s", path, exc)
+        return {}
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid JSON in workspace config %s: %s", path, exc)
         return {}
 
 
@@ -267,7 +372,8 @@ def _maybe_submit_hpc_build(context: dict, workspace: Path, args: argparse.Names
         print(f"[hpc] {scheduler.scheduler} CLI not found; building locally instead.")
         return False
 
-    build_cmd = f"python main.py build --workspace {workspace} --no-hpc --cycles {args.cycles}"
+    import shlex
+    build_cmd = f"python main.py build --workspace {shlex.quote(str(workspace))} --no-hpc --cycles {int(args.cycles)}"
     commands = [build_cmd]
     if scheduler.post_build_run and context.get("runtime", {}).get("benchmark_command"):
         commands.append(context["runtime"]["benchmark_command"])
@@ -313,6 +419,88 @@ def _run_validation_stage(context: dict, workspace: Path) -> int:
     if not report.passed and validator.is_gatekeeper:
         print("[validation] FAILED (gatekeeper) -> build marked unsuccessful")
         return 1
+    return 0
+
+
+def plan_command(args: argparse.Namespace) -> int:
+    """Auto-discover ``blueprint.aero``, validate, build the DAG, and print a visual tree.
+
+    This is the quick-feedback command: no compilation happens, just parsing,
+    validation, dependency resolution, and a clean tree of what the build
+    *would* do.  Supports both the block DSL and the legacy INI format.
+    """
+    import blueprint_lang
+    from aero_ui import AeroUI
+    from build_graph import blueprint_to_dag
+    from src.build.compilers import get_backend
+
+    ui = AeroUI()
+    workspace = Path(args.workspace).resolve()
+    bp_path = Path(args.blueprint) if args.blueprint else workspace / "blueprint.aero"
+
+    if not bp_path.exists():
+        print(f"{bp_path}: blueprint file not found", file=sys.stderr)
+        return 1
+
+    source = bp_path.read_text(encoding="utf-8")
+
+    if blueprint_lang.looks_like_blueprint_dsl(source):
+        ui.parsing(str(bp_path))
+        error = blueprint_lang.check_source(source, filename=str(bp_path))
+        if error is not None:
+            print(error, file=sys.stderr)
+            return 2
+
+        blueprint = blueprint_lang.load_source(source, filename=str(bp_path))
+        graph = blueprint_to_dag(blueprint)
+        ui.validating(len(graph.build_order))
+        ui.resolving(len(graph.build_order), len(graph.levels))
+
+        # Show compiler availability per target
+        for name in graph.build_order:
+            node = graph.targets[name]
+            backend = get_backend(node.language)
+            binary = backend.discover() if backend else None
+            status = binary or "not found"
+            ui.plan(f"{name} ({node.language}) -> {status}")
+
+        print()
+        print(graph.render_tree())
+        return 0
+
+    # Legacy INI/JSON -- parse through blueprint_parser and summarise.
+    import blueprint_parser
+
+    ui.parsing(str(bp_path))
+    context = blueprint_parser.parse_blueprint(str(bp_path))
+    if context.get("workspace_status") == "reverted_fallback":
+        print(f"blueprint validation failed: {context.get('fallback_reason')}", file=sys.stderr)
+        return 2
+
+    graph_section = context.get("graph", {})
+    targets = graph_section.get("targets", [])
+    deps = graph_section.get("dependencies", {})
+    metadata = graph_section.get("target_metadata", [])
+    meta_by_name = {m.get("name", ""): m for m in metadata} if metadata else {}
+    ui.validating(len(targets))
+
+    header = "Build Plan (legacy INI/JSON)"
+    lines = [header, "=" * len(header)]
+    for idx, name in enumerate(targets, 1):
+        is_last = idx == len(targets)
+        connector = "└── " if is_last else "├── "
+        continuation = "    " if is_last else "│   "
+        meta = meta_by_name.get(name, {})
+        source_info = meta.get("source", "")
+        lines.append(f"{connector}{idx}. {name}")
+        target_deps = deps.get(name, [])
+        if target_deps:
+            lines.append(f"{continuation}requires: {', '.join(target_deps)}")
+        if source_info:
+            lines.append(f"{continuation}source:   {source_info}")
+    lines.append("")
+    lines.append(f"{len(targets)} target{'s' if len(targets) != 1 else ''}")
+    print("\n".join(lines))
     return 0
 
 
@@ -772,6 +960,15 @@ def create_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("--validation-only", action="store_true", help="Skip the build; only run the validation suite")
     build_parser.set_defaults(handler=build_command)
 
+    # --- plan (discover, validate, build DAG, print visual tree) ---
+    plan_parser = subparsers.add_parser(
+        "plan",
+        help="Parse blueprint.aero, resolve the build DAG, and print a visual tree",
+    )
+    plan_parser.add_argument("--workspace", default=".", help="Workspace root containing blueprint.aero")
+    plan_parser.add_argument("--blueprint", default=None, help="Explicit path to a blueprint file")
+    plan_parser.set_defaults(handler=plan_command)
+
     # --- check (strict blueprint validation, no build) ---
     check_parser = subparsers.add_parser(
         "check", help="Strictly validate a block-format blueprint.aero (no build)"
@@ -897,4 +1094,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from error_interceptor import guarded_main
+
+    sys.exit(guarded_main(lambda: main()))

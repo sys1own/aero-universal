@@ -1,6 +1,9 @@
 import ast
+import logging
 import os
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("translator.aero_translator")
 a = 25
 b = 5
 
@@ -114,7 +117,8 @@ def translate_file(v, w=None):
         y = x.read()
     try:
         z = ast.parse(y, filename=v)
-    except SyntaxError:
+    except SyntaxError as exc:
+        logger.debug("Skipping %s due to syntax error: %s", v, exc)
         return e(source_file=v)
     if w is None:
         w = [n.name for n in ast.walk(z) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]

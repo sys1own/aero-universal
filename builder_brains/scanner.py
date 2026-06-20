@@ -13,7 +13,6 @@ Implements:
 Pipeline entry point: evaluate(metadata, hyper_params)
 """
 import hashlib
-import json
 import logging
 import math
 import os
@@ -24,25 +23,15 @@ from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed, Future
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from builder_brains.manifest_utils import (
+    get_cost_ceilings,
+    get_module_params,
+    get_thresholds,
+    load_manifest,
+)
+
 logger = logging.getLogger('builder_brains.scanner')
-_MANIFEST_PATH = os.path.join(os.path.dirname(__file__), 'build_manifest.json')
-
-def _load_manifest() -> Dict[str, Any]:
-    try:
-        with open(_MANIFEST_PATH, 'r', encoding='utf-8') as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning('Failed to load build_manifest.json: %s — using defaults', exc)
-        return {}
-
-def _get_scanner_params(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('hyperparameter_weights', {}).get('scanner', {})
-
-def _get_thresholds(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('thresholds', {})
-
-def _get_cost_ceilings(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('execution_cost_ceilings', {})
 _TOKEN_PATTERNS: Dict[str, str] = {'function_def': '\\bdef\\s+[a-zA-Z_]\\w*\\s*\\(', 'class_def': '\\bclass\\s+[a-zA-Z_]\\w*\\s*[\\(:]', 'import_stmt': '^\\s*(?:from\\s+\\S+\\s+)?import\\s+', 'decorator': '^\\s*@[a-zA-Z_]\\w*', 'string_literal': '(?:\\"\\"\\"[\\s\\S]*?\\"\\"\\"|\'\'\'[\\s\\S]*?\'\'\'|\\"[^\\"\\\\]*(?:\\\\.[^\\"\\\\]*)*\\"|\'[^\'\\\\]*(?:\\\\.[^\'\\\\]*)*\')', 'numeric_literal': '\\b(?:0[xXoObB])?[\\d]+(?:\\.[\\d]+)?(?:[eE][+-]?\\d+)?\\b', 'comment_line': '#[^\\n]*', 'assignment': '[a-zA-Z_]\\w*\\s*(?:[:+\\-*/|&^]=|=(?!=))', 'return_stmt': '\\breturn\\b', 'raise_stmt': '\\braise\\b', 'try_block': '\\btry\\s*:', 'except_block': '\\bexcept\\b', 'with_stmt': '\\bwith\\b', 'yield_expr': '\\byield\\b', 'lambda_expr': '\\blambda\\b', 'list_comp': '\\[.+\\bfor\\b.+\\bin\\b.+\\]', 'dict_comp': '\\{.+:\\s*.+\\bfor\\b.+\\bin\\b.+\\}', 'assert_stmt': '\\bassert\\b', 'global_stmt': '\\bglobal\\b', 'nonlocal_stmt': '\\bnonlocal\\b', 'async_def': '\\basync\\s+def\\b', 'await_expr': '\\bawait\\b'}
 
 @lru_cache(maxsize=4096)
@@ -336,10 +325,10 @@ def evaluate(metadata: Dict[str, Any], hyper_params: Dict[str, Any]) -> Dict[str
     """
     start_time: float = time.monotonic()
     logger.info('Scanner pipeline started')
-    manifest: Dict[str, Any] = _load_manifest()
-    params: Dict[str, Any] = {**_get_scanner_params(manifest), **hyper_params}
-    thresholds: Dict[str, Any] = _get_thresholds(manifest)
-    ceilings: Dict[str, Any] = _get_cost_ceilings(manifest)
+    manifest: Dict[str, Any] = load_manifest()
+    params: Dict[str, Any] = {**get_module_params(manifest, 'scanner'), **hyper_params}
+    thresholds: Dict[str, Any] = get_thresholds(manifest)
+    ceilings: Dict[str, Any] = get_cost_ceilings(manifest)
     wall_limit: float = ceilings.get('scanner_max_wall_seconds', 60.0)
     worker_count: int = int(params.get('concurrent_worker_pool_size', 8))
     max_file_bytes: int = int(params.get('max_file_scan_bytes', 10485760))

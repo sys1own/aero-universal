@@ -13,6 +13,7 @@ returns an empty, unsuccessful :class:`RuntimeMetrics`.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -23,6 +24,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.utils.json_parsing import extract_json
+from src.utils.serialization import dataclass_to_dict
+
+logger = logging.getLogger("runtime.feedback")
 
 @dataclass
 class RuntimeMetrics:
@@ -37,16 +42,7 @@ class RuntimeMetrics:
     error: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "success": self.success,
-            "wall_time": self.wall_time,
-            "cpu_time": self.cpu_time,
-            "peak_rss_mb": self.peak_rss_mb,
-            "energy": self.energy,
-            "accuracy_error": self.accuracy_error,
-            "returncode": self.returncode,
-            "error": self.error,
-        }
+        return dataclass_to_dict(self, exclude=["raw"])
 
 
 _NUMBER_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
@@ -153,7 +149,7 @@ class RuntimeFeedback:
     def parse_metrics(self, stdout: str) -> Dict[str, Any]:
         """Extract metrics from benchmark output (JSON first, then regex)."""
         parsed: Dict[str, Any] = {}
-        blob = self._extract_json(stdout)
+        blob = extract_json(stdout)
         if isinstance(blob, dict):
             for key in ("wall_time", "energy", "accuracy", "accuracy_error"):
                 if key in blob:
@@ -222,23 +218,6 @@ class RuntimeFeedback:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _extract_json(text: str) -> Optional[Any]:
-        # Try the whole string, then the first {...} span.
-        text = text.strip()
-        try:
-            return json.loads(text)
-        except (ValueError, TypeError):
-            pass
-        start = text.find("{")
-        end = text.rfind("}")
-        if 0 <= start < end:
-            try:
-                return json.loads(text[start : end + 1])
-            except (ValueError, TypeError):
-                return None
-        return None
-
-    @staticmethod
     def _collect_reference_numbers(ref_path: Path) -> List[float]:
         numbers: List[float] = []
         files = [ref_path] if ref_path.is_file() else sorted(ref_path.rglob("*"))
@@ -265,17 +244,23 @@ class RuntimeFeedback:
                 try:
                     cct = child.cpu_times()
                     total += cct.user + cct.system
-                except Exception:
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
             return total
-        except Exception:
-            try:
-                import resource
+        except ImportError:
+            pass
+        except Exception as exc:
+            logger.debug("psutil CPU time collection failed: %s", exc)
+        try:
+            import resource
 
-                usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-                return usage.ru_utime + usage.ru_stime
-            except Exception:
-                return 0.0
+            usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+            return usage.ru_utime + usage.ru_stime
+        except ImportError:
+            return 0.0
+        except Exception as exc:
+            logger.debug("resource CPU time collection failed: %s", exc)
+            return 0.0
 
     @staticmethod
     def _peak_rss_mb() -> float:
@@ -285,5 +270,8 @@ class RuntimeFeedback:
             maxrss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
             # Linux reports KB, macOS reports bytes.
             return maxrss / 1024.0 if maxrss > 1_000_000 else maxrss / 1024.0
-        except Exception:
+        except ImportError:
+            return 0.0
+        except Exception as exc:
+            logger.debug("Failed to read peak RSS: %s", exc)
             return 0.0
