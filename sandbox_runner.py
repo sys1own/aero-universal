@@ -76,7 +76,16 @@ class PerformanceTrace:
         }
 
 
+_ALLOWED_MODULE_PREFIXES = ("build_sandbox.", "sandbox_runner")
+
+
 def _resolve_callable(module_name: str, callable_name: Optional[str]) -> tuple[Any, Callable[..., Any], str]:
+    if not any(module_name == prefix or module_name.startswith(prefix + ".")
+               for prefix in _ALLOWED_MODULE_PREFIXES):
+        raise ImportError(
+            f"Module '{module_name}' is outside the allowed sandbox scope. "
+            f"Only modules under {_ALLOWED_MODULE_PREFIXES} may be loaded."
+        )
     module = importlib.import_module(module_name)
     if callable_name:
         target = getattr(module, callable_name)

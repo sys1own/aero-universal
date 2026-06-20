@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -135,11 +136,11 @@ class HPCScheduler:
 
         lines.append("")
         if workdir:
-            lines.append(f"cd {workdir}")
+            lines.append(f"cd {shlex.quote(workdir)}")
         for module in self.environment.get("module_load", []) or []:
-            lines.append(f"module load {module}")
+            lines.append(f"module load {shlex.quote(module)}")
         for key, value in (self.environment.get("env_vars", {}) or {}).items():
-            lines.append(f"export {key}={value}")
+            lines.append(f"export {shlex.quote(key)}={shlex.quote(str(value))}")
         lines.append("")
         lines.extend(commands)
         return "\n".join(lines) + "\n"
