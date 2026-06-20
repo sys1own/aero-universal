@@ -1,5 +1,32 @@
 from __future__ import annotations
 
+import sys
+import os
+import re
+
+# Aero Universal Entry-Gate Interception Hook
+if len(sys.argv) > 1 and sys.argv[1] == "build":
+    print("\n[Aero Gate] 'build' command intercepted successfully. Activating universal compiler driver...")
+    try:
+        from src.compiler_driver import run_universal_compiler
+        target_name = "anyon_simulator"
+        
+        # Pull target metadata from blueprint
+        if os.path.exists("blueprint.aero"):
+            with open("blueprint.aero", "r") as bf:
+                b_content = bf.read()
+                matches = re.findall(r'targets\s*=\s*\["(.*?)"\]', b_content)
+                if matches:
+                    target_name = matches[0]
+                    
+        recipe_dict = {"parallelism": 2, "unroll": 4, "vectorization": "avx2"}
+        success = run_universal_compiler("/content/aero-universal", target_name, recipe_dict)
+        sys.exit(0 if success else 1)
+    except Exception as gate_err:
+        print(f"[Aero Gate Error] Failed to route to compiler driver: {str(gate_err)}")
+        sys.exit(1)
+
+
 import argparse
 import json
 import logging
