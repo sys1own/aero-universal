@@ -294,6 +294,7 @@ The `main.py` script provides several subcommands:
 | `hpc` | Submit build to HPC cluster (SLURM/PBS) |
 | `validate` | Run the validation suite and report results |
 | `runtime` | Execute runtime benchmarks and feed back into fitness |
+| `invariants` | Ingest unstructured context + code into the domain‑agnostic Invariant Schema |
 
 ### Common Options
 
@@ -301,6 +302,88 @@ The `main.py` script provides several subcommands:
 - `--config <path>` – explicit path to blueprint file (JSON or INI)
 - `--verbose` – enable debug logging
 - `--cycles <n>` – number of build cycles (for iterative improvement)
+
+---
+
+## Semantic Fluidity Engine
+
+Aero can ingest **entirely unstructured context** — medical papers, math
+write‑ups, economics prose, JSON config, raw `.cpp`/`.py` source, even
+`.pdf` reports — and turn it into a structured **Invariant Schema** that the
+code generator nodes can consume as a high‑level compilation input. This is
+handled by the [`src/semantic_fluidity`](src/semantic_fluidity/) package via
+`ContextIngestionEngine`.
+
+```python
+from pathlib import Path
+from src.semantic_fluidity import ContextIngestionEngine
+
+engine = ContextIngestionEngine()
+schema = engine.ingest_directory(Path("context_sources/"))
+compilation_inputs = engine.to_compilation_inputs(schema)
+```
+
+**Supported inputs:** `.txt` / `.md`, `.pdf` (dependency‑free fallback parser,
+or `pypdf`/`PyPDF2` if installed), `.json`, and source code (`.py`/`.pyi`,
+`.cpp`/`.cc`/`.cxx`/`.hpp`/`.hh`, `.c`/`.h`).
+
+**Extraction.** Every file is routed to an extractor based on its format:
+
+| Format | Extractor | Technique |
+|--------|-----------|-----------|
+| Prose (`.txt`/`.md`/`.pdf`) | `TextRuleExtractor` | Cue‑phrase + regex ("let X be…", "where X denotes…", "X must not exceed N…", `lhs = rhs` equations) |
+| Python | `CodeRuleExtractor` | `ast`‑based: module constants, `assert` conditions, single‑expression functions |
+| C/C++ | `CodeRuleExtractor` | Regex: `#define`, `const TYPE NAME = VALUE;`, `assert(...)` |
+| JSON | `JsonRuleExtractor` | Structured passthrough (`state_variables`/`boundaries`/`equations` keys) or generic scalar flattening |
+
+An `LLMClient` interface (`NullLLMClient` by default) lets a real API or
+local model be wired into `LLMAssistedExtractor` for higher‑fidelity
+extraction; every extractor above remains fully functional offline.
+
+**The Invariant Schema** namespaces every extracted fact under
+`"<domain>::<symbol>"` so unrelated fields never collide — a `rate` found in
+a genomics paper and a `rate` found in a game‑engine source file become
+`genomics::rate` and `game_engine::rate`, two independent entries:
+
+```json
+{
+  "domains": ["genomics", "game_engine"],
+  "state_variables": [
+    {"id": "genomics::rate", "kind": "state_variable", "domain": "genomics", "symbol": "rate", "description": "the mutation rate"},
+    {"id": "game_engine::rate", "kind": "state_variable", "domain": "game_engine", "symbol": "rate", "description": "the frame render rate"}
+  ],
+  "boundaries": [],
+  "equations": []
+}
+```
+
+These never merge, but they **are** connected: `SystemGraph` builds a
+`networkx` graph with `defines` edges (domain → invariant), `references`
+edges (boundary/equation → same‑domain variable), and `shared_symbol` edges
+auto‑detected across domains that share a bare symbol name (like `rate`
+above) — so the synthesis layer can reason about both without conflating
+them. Explicit cross‑domain relationships can also be declared with
+`graph.link_domains(...)`.
+
+**Run it standalone:**
+
+```bash
+python main.py invariants --source-dir context_sources/
+```
+
+**Or opt it into the build pipeline** via `blueprint_config.json`:
+
+```json
+{
+  "semantic_fluidity": {
+    "enabled": true,
+    "source_dir": "context_sources"
+  }
+}
+```
+
+When enabled, `build` ingests `source_dir` and writes
+`invariant_schema_report.json` to the workspace before the build proceeds.
 
 ---
 
@@ -315,6 +398,7 @@ After a successful build, you will find:
 | Hardware profile | `.aero/hardware_profile.json` | Measured cache and SIMD parameters. |
 | Evolution checkpoints | `.aero/evolution_checkpoints/` | Population snapshots for each generation. |
 | Query cache | `.aero/query_cache/` | AST‑node‑level cached compilation units. |
+| Invariant Schema report | `invariant_schema_report.json` | Domain‑namespaced state variables/boundaries/equations + system graph (opt‑in, see [Semantic Fluidity Engine](#semantic-fluidity-engine)). |
 | Build manifest | `build_manifest.json` | Final configuration and performance metrics. |
 | Audit log | `WORKSPACE_AUDIT.md` | Human‑readable summary of the build. |
 
