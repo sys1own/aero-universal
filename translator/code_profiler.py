@@ -9,10 +9,13 @@ and exports a JSON performance-density manifest.
 import ast
 import hashlib
 import json
+import logging
 import os
 import re
 import sys
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("translator.code_profiler")
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -146,7 +149,8 @@ class _CallCollector(ast.NodeVisitor):
 def analyze_python(source: str, filepath: str) -> list[FunctionProfile]:
     try:
         tree = ast.parse(source, filename=filepath)
-    except SyntaxError:
+    except SyntaxError as exc:
+        logger.debug("Skipping %s due to syntax error: %s", filepath, exc)
         return []
 
     profiles = []
@@ -483,7 +487,8 @@ def profile_file(entry: dict, target_dir: str) -> FileProfile | None:
     try:
         with open(path, "r", encoding="utf-8", errors="replace") as f:
             source = f.read()
-    except OSError:
+    except OSError as exc:
+        logger.debug("Cannot read %s: %s", path, exc)
         return None
 
     lang_map = {".py": "python", ".js": "javascript", ".rs": "rust"}

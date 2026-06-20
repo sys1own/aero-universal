@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -19,6 +20,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import networkx as nx
+
+logger = logging.getLogger("memoization.cache_engine")
 
 
 @dataclass
@@ -164,8 +167,8 @@ class QueryCache:
                 "version": entry.version,
             }
             path.write_text(json.dumps(data))
-        except Exception:
-            pass
+        except (OSError, TypeError, ValueError) as exc:
+            logger.warning("Failed to persist cache entry %r to disk: %s", entry.key, exc)
 
     def _load_from_disk(self, key: str) -> Optional[CacheEntry]:
         path = self._cache_file(key)
@@ -181,7 +184,8 @@ class QueryCache:
                 dependencies=data.get("dependencies", []),
                 version=data.get("version", 1),
             )
-        except Exception:
+        except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+            logger.debug("Failed to load cache entry %r from disk: %s", key, exc)
             return None
 
     def _remove_from_disk(self, key: str) -> None:
@@ -276,7 +280,8 @@ class MemoizationEngine:
         """Fingerprint a file's semantic content (ignoring whitespace and comments)."""
         try:
             content = Path(file_path).read_text(encoding="utf-8")
-        except Exception:
+        except OSError as exc:
+            logger.debug("Cannot read %s for fingerprinting: %s", file_path, exc)
             return "missing"
 
         if self.strategies.get("ignore_comments_and_whitespace", True):

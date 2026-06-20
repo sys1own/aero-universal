@@ -8,9 +8,12 @@ libraries without attempting to translate their internals.
 
 import ast
 import importlib
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("translator.ffi_generator")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
@@ -105,7 +108,8 @@ def extract_imports(source: str, filepath: str = "<string>") -> list[ImportInfo]
     """Parse a Python source file and extract all import statements."""
     try:
         tree = ast.parse(source, filename=filepath)
-    except SyntaxError:
+    except SyntaxError as exc:
+        logger.debug("Skipping %s due to syntax error: %s", filepath, exc)
         return []
 
     imports = []
@@ -179,7 +183,8 @@ def map_function_externals(source: str, filepath: str,
     """
     try:
         tree = ast.parse(source, filename=filepath)
-    except SyntaxError:
+    except SyntaxError as exc:
+        logger.debug("Skipping %s due to syntax error: %s", filepath, exc)
         return {}
 
     external_modules = {i.module.split(".")[0] for i in imports if i.is_external}

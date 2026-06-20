@@ -173,7 +173,8 @@ def maybe_run_neural_synthesis(
     bottleneck_source = _extract_bottleneck_source(decision, evaluation_context)
     try:
         generated_variants = neural_synthesis.generate_logic_mutation(bottleneck_source, {'stagnation_event': True})
-    except Exception:
+    except Exception as exc:
+        logger.warning("Neural synthesis mutation failed: %s", exc)
         return []
     if not generated_variants:
         return []

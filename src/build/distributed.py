@@ -19,6 +19,7 @@ always intact (graceful fallback).
 from __future__ import annotations
 
 import itertools
+import logging
 import os
 import shutil
 import subprocess
@@ -31,6 +32,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from src.utils.serialization import dataclass_to_dict
 
+logger = logging.getLogger("build.distributed")
 
 @dataclass
 class BuildTask:
@@ -159,7 +161,7 @@ class SSHBackend(WorkerBackend):
     def is_available(self) -> bool:
         try:
             import fabric  # noqa: F401
-        except Exception:
+        except ImportError:
             return False
         return True
 
@@ -218,7 +220,7 @@ class KubernetesBackend(WorkerBackend):
     def is_available(self) -> bool:
         try:
             import kubernetes  # noqa: F401
-        except Exception:
+        except ImportError:
             return False
         return True
 
@@ -238,6 +240,7 @@ class KubernetesBackend(WorkerBackend):
             try:
                 kube_config.load_incluster_config()
             except Exception:
+                logger.debug("In-cluster k8s config unavailable, falling back to kubeconfig")
                 kube_config.load_kube_config()
 
             core = client.CoreV1Api()
@@ -315,7 +318,12 @@ class SharedCache:
             client = redis.Redis.from_url(url)
             client.ping()
             return client
-        except Exception:
+        except ImportError:
+            logger.debug("redis package not available")
+            self._backend_ok = False
+            return None
+        except Exception as exc:
+            logger.warning("Redis connection failed: %s", exc)
             self._backend_ok = False
             return None
 
@@ -324,7 +332,12 @@ class SharedCache:
             import boto3  # type: ignore
 
             return boto3.client("s3")
-        except Exception:
+        except ImportError:
+            logger.debug("boto3 package not available")
+            self._backend_ok = False
+            return None
+        except Exception as exc:
+            logger.warning("S3 client initialization failed: %s", exc)
             self._backend_ok = False
             return None
 
@@ -336,15 +349,15 @@ class SharedCache:
             try:
                 self._client.set(f"aero:cache:{key}", src.read_bytes())
                 return True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Redis cache put failed for key %r: %s", key, exc)
         if self.mode == "s3" and self._client is not None:
             bucket = os.environ.get("AERO_S3_BUCKET", "aero-build-cache")
             try:
                 self._client.upload_file(str(src), bucket, key)
                 return True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("S3 cache put failed for key %r: %s", key, exc)
         # nfs and all fallbacks: copy into the shared/spill directory.
         dest = self._spill / key
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -358,15 +371,15 @@ class SharedCache:
                 if blob is not None:
                     Path(dest).write_bytes(blob)
                     return True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Redis cache get failed for key %r: %s", key, exc)
         if self.mode == "s3" and self._client is not None:
             bucket = os.environ.get("AERO_S3_BUCKET", "aero-build-cache")
             try:
                 self._client.download_file(bucket, key, dest)
                 return True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("S3 cache get failed for key %r: %s", key, exc)
         src = self._spill / key
         if src.exists():
             shutil.copy2(src, dest)

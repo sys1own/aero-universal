@@ -7,9 +7,12 @@ equivalence by leaving them untouched.
 """
 
 import ast
+import logging
 import os
 import re
 from dataclasses import dataclass, field
+
+logger = logging.getLogger("translator.cold_pass_router")
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
@@ -242,7 +245,8 @@ def analyze_routing(source_path: str,
 
     try:
         tree = ast.parse(source, filename=abs_path)
-    except SyntaxError:
+    except SyntaxError as exc:
+        logger.debug("Skipping %s due to syntax error: %s", source_path, exc)
         return RoutingAnalysis(source_file=source_path)
 
     if external_modules is None:
