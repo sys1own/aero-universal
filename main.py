@@ -61,9 +61,16 @@ def _strict_blueprint_gate(workspace: Path) -> Optional[int]:
 
 def build_command(args: argparse.Namespace) -> int:
     import blueprint_parser
+    from aero_ui import AeroUI
+    from error_interceptor import handle_compile_results
 
+    ui = AeroUI()
     orchestrator.configure_logging(verbose=args.verbose)
     workspace = Path(args.workspace).resolve()
+    bp_path = workspace / "blueprint.aero"
+
+    # Phase 1: Parsing
+    ui.parsing(str(bp_path))
 
     # Strict syntax/validation gate -- runs BEFORE any build step so a broken
     # block-format blueprint aborts immediately with a clear diagnostic.
@@ -71,7 +78,16 @@ def build_command(args: argparse.Namespace) -> int:
     if gate is not None:
         return gate
 
-    context = blueprint_parser.parse_blueprint(str(workspace / "blueprint.aero"))
+    context = blueprint_parser.parse_blueprint(str(bp_path))
+
+    # Phase 2: Validating
+    targets = context.get("compilation_targets", [])
+    is_dsl = context.get("blueprint_format") == "dsl"
+    ui.validating(len(targets))
+
+    # If DSL format, resolve the build graph and compile targets.
+    if is_dsl and not getattr(args, "validation_only", False):
+        return _build_dsl_targets(context, workspace, ui, args)
 
     # --validation-only: skip the build entirely and just run the suite.
     if getattr(args, "validation_only", False):
@@ -90,13 +106,13 @@ def build_command(args: argparse.Namespace) -> int:
         ran_on_cluster = _maybe_submit_hpc_build(context, workspace, args)
 
     if not ran_on_cluster:
+        ui.tag("Compiling", f"{len(targets)} target(s) via orchestrator")
         metadata = orchestrator.run_build(
             workspace_root=str(workspace),
             cycles=args.cycles,
             telemetry_interval=args.telemetry_interval,
         )
-        print()
-        print("Build completed successfully.")
+        ui.success()
         print(f"Manifest: {metadata.get('manifest_path')}")
         for asset in metadata.get("applied_assets", []):
             print(f"Updated asset: {asset}")
@@ -111,6 +127,87 @@ def build_command(args: argparse.Namespace) -> int:
 
     # Validation gatekeeper (feature #5).
     return _run_validation_stage(context, workspace)
+
+
+def _build_dsl_targets(
+    context: dict,
+    workspace: Path,
+    ui: "AeroUI",
+    args: argparse.Namespace,
+) -> int:
+    """Compile DSL blueprint targets using the compiler wrappers."""
+    from error_interceptor import handle_compile_results
+    from src.build.compilers import CompileResult, compile_target
+
+    graph = context.get("graph", {})
+    target_metadata = graph.get("target_metadata", [])
+    build_order = graph.get("targets", [])
+    dep_map = graph.get("dependencies", {})
+
+    # Phase 3: Resolving
+    # Compute parallel stages for display
+    from build_graph import BuildGraph, TargetNode
+
+    target_nodes = {}
+    for m in target_metadata:
+        target_nodes[m["name"]] = TargetNode(
+            name=m["name"],
+            language=m.get("language", ""),
+            sources=m.get("sources", []),
+            requires=m.get("requires", []),
+            flags=m.get("flags", []),
+            defines=m.get("defines", []),
+            output=m.get("output"),
+            optional=m.get("optional", False),
+        )
+    bg = BuildGraph(
+        targets=target_nodes,
+        dependency_map=dep_map,
+        build_order=build_order,
+    )
+    stage_count = len(bg.levels)
+    ui.resolving(len(build_order), stage_count)
+
+    # Phase 4: Compiling each target
+    results: list[CompileResult] = []
+    meta_by_name = {m["name"]: m for m in target_metadata}
+
+    for name in build_order:
+        meta = meta_by_name.get(name, {})
+        language = meta.get("language", "")
+        sources = meta.get("sources", [])
+        output = meta.get("output")
+        flags = meta.get("flags", [])
+        defines = meta.get("defines", [])
+        optional = meta.get("optional", False)
+
+        ui.compiling(name, language)
+        result = compile_target(
+            target_name=name,
+            language=language,
+            sources=sources,
+            output=output,
+            flags=flags,
+            defines=defines,
+            workdir=workspace,
+        )
+        results.append(result)
+
+        if result.success:
+            ui.compiled(name, language)
+        elif optional:
+            ui.skipped(name, "(optional, compiler unavailable)")
+        else:
+            ui.compile_error(name, result.error_summary)
+
+    # Phase 5: Report
+    exit_code = handle_compile_results(
+        [r for r in results if not meta_by_name.get(r.target_name, {}).get("optional", False) or not r.success],
+        ui,
+    )
+    if exit_code == 0:
+        ui.success()
+    return exit_code
 
 
 def _workspace_json_config(workspace: Path) -> dict:
@@ -251,8 +348,11 @@ def plan_command(args: argparse.Namespace) -> int:
     *would* do.  Supports both the block DSL and the legacy INI format.
     """
     import blueprint_lang
+    from aero_ui import AeroUI
     from build_graph import blueprint_to_dag
+    from src.build.compilers import get_backend
 
+    ui = AeroUI()
     workspace = Path(args.workspace).resolve()
     bp_path = Path(args.blueprint) if args.blueprint else workspace / "blueprint.aero"
 
@@ -263,6 +363,7 @@ def plan_command(args: argparse.Namespace) -> int:
     source = bp_path.read_text(encoding="utf-8")
 
     if blueprint_lang.looks_like_blueprint_dsl(source):
+        ui.parsing(str(bp_path))
         error = blueprint_lang.check_source(source, filename=str(bp_path))
         if error is not None:
             print(error, file=sys.stderr)
@@ -270,12 +371,25 @@ def plan_command(args: argparse.Namespace) -> int:
 
         blueprint = blueprint_lang.load_source(source, filename=str(bp_path))
         graph = blueprint_to_dag(blueprint)
+        ui.validating(len(graph.build_order))
+        ui.resolving(len(graph.build_order), len(graph.levels))
+
+        # Show compiler availability per target
+        for name in graph.build_order:
+            node = graph.targets[name]
+            backend = get_backend(node.language)
+            binary = backend.discover() if backend else None
+            status = binary or "not found"
+            ui.plan(f"{name} ({node.language}) -> {status}")
+
+        print()
         print(graph.render_tree())
         return 0
 
     # Legacy INI/JSON -- parse through blueprint_parser and summarise.
     import blueprint_parser
 
+    ui.parsing(str(bp_path))
     context = blueprint_parser.parse_blueprint(str(bp_path))
     if context.get("workspace_status") == "reverted_fallback":
         print(f"blueprint validation failed: {context.get('fallback_reason')}", file=sys.stderr)
@@ -286,6 +400,7 @@ def plan_command(args: argparse.Namespace) -> int:
     deps = graph_section.get("dependencies", {})
     metadata = graph_section.get("target_metadata", [])
     meta_by_name = {m.get("name", ""): m for m in metadata} if metadata else {}
+    ui.validating(len(targets))
 
     header = "Build Plan (legacy INI/JSON)"
     lines = [header, "=" * len(header)]
@@ -728,4 +843,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    from error_interceptor import guarded_main
+
+    sys.exit(guarded_main(lambda: main()))
