@@ -142,7 +142,7 @@ rustup default stable
 
 ## Blueprint Reference
 
-The Aero Multi‑Tool supports **two blueprint formats**: legacy INI (for backward compatibility) and modern JSON. The JSON format is recommended for new projects.
+The Aero Multi‑Tool supports **three blueprint formats**: the declarative **block DSL** (recommended, strictly validated before the build), modern **JSON**, and legacy **INI** (for backward compatibility).
 
 ### JSON Format
 
@@ -209,6 +209,65 @@ Optional sections enable advanced features:
 }
 ```
 
+### Block DSL Format (recommended)
+
+A small, declarative, block‑structured language for describing a multi‑language
+build. It is handled by the dedicated [`blueprint_lang`](blueprint_lang/) package
+(lexer → parser → validator) and is **strictly checked before any build step**:
+a single syntax or validation error aborts the run with an exact `line:column`
+and a `^` pointer at the problem.
+
+```aero
+project "my_universal_app" {
+    version = "1.0.0"
+}
+
+target "core_engine" {
+    language = "cpp"
+    sources  = ["src/core/**/*.cpp", "src/core/**/*.hpp"]
+    flags    = ["-O3", "-std=c++20"]
+}
+
+target "bindings" {
+    language = "python"
+    requires = ["core_engine"]
+    sources  = ["src/bindings/*.py"]
+}
+```
+
+**Grammar.** A document is a flat list of blocks; each block is
+`<type> "<name>" { key = value … }`. Values are quoted strings, numbers,
+`true`/`false`, or `[lists]`. Comments start with `#` or `//`.
+
+**Validation rules.** Exactly one `project` block; at least one `target`; only
+known keys per block (`target`: `language`, `sources`, `requires`, `flags`,
+`defines`, `output`, `optional`); required keys present (`project.version`,
+`target.language`, `target.sources`); `language` ∈ `{c, cpp, fortran, python,
+rust}`; unique target names; every `requires` entry must reference a real
+target; and the `requires` graph must be **acyclic**.
+
+**Validate it without building** (a clean pre‑flight gate, exit code `0`/`1`):
+
+```bash
+python main.py check                       # validates ./blueprint.aero
+python main.py check --blueprint app.aero  # validate a specific file
+python -m blueprint_lang blueprint.aero    # same check, standalone
+```
+
+Example diagnostic for a broken blueprint:
+
+```text
+error: unterminated string literal
+  --> blueprint.aero:7:15
+   |
+ 7 |     version = "1.0.0
+   |               ^ this string is never closed
+   |
+   = help: strings cannot span lines; add a closing double quote (")
+```
+
+See [`blueprint.aero.sample`](blueprint.aero.sample) for a complete example.
+
 ### INI Format (Legacy)
 
 For legacy projects, the INI format is still supported. See the original [README](README_legacy.md) for details.
@@ -222,6 +281,7 @@ The `main.py` script provides several subcommands:
 | Command | Description |
 |---------|-------------|
 | `build` | Full build pipeline (scanner → decision tree → tuner → compiler) |
+| `check` | Strictly validate a block‑DSL `blueprint.aero` (no build) |
 | `ingest` | Ingest external source trees, repair code, and integrate into the workspace |
 | `evolve` | Run only the evolutionary optimisation loop (without full build) |
 | `analyze` | Perform semantic analysis and generate UAST graph |

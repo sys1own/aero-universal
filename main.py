@@ -24,11 +24,49 @@ def _load_blueprint_config(path: Optional[str] = None) -> dict:
 # ------------------------------------------------------------------
 
 
+def _strict_blueprint_gate(workspace: Path) -> Optional[int]:
+    """Strictly validate a block-format ``blueprint.aero`` before any build step.
+
+    Returns an exit code to abort with, or ``None`` to proceed.  This is a no-op
+    for the legacy INI/JSON blueprint formats (which keep their existing
+    fallback behaviour); it only engages for the declarative block DSL handled by
+    :mod:`blueprint_lang`, where a syntax/validation error must abort the run with
+    a precise, user-friendly message before anything is built.
+    """
+    import blueprint_lang
+
+    bp_path = workspace / "blueprint.aero"
+    if not bp_path.exists():
+        return None
+    try:
+        source = bp_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    if not blueprint_lang.looks_like_blueprint_dsl(source):
+        return None
+    error = blueprint_lang.check_source(source, filename=str(bp_path))
+    if error is None:
+        return None
+    print(error, file=sys.stderr)
+    print(
+        "\nAborting: blueprint.aero failed strict validation; no build steps were run.",
+        file=sys.stderr,
+    )
+    return 2
+
+
 def build_command(args: argparse.Namespace) -> int:
     import blueprint_parser
 
     orchestrator.configure_logging(verbose=args.verbose)
     workspace = Path(args.workspace).resolve()
+
+    # Strict syntax/validation gate -- runs BEFORE any build step so a broken
+    # block-format blueprint aborts immediately with a clear diagnostic.
+    gate = _strict_blueprint_gate(workspace)
+    if gate is not None:
+        return gate
+
     context = blueprint_parser.parse_blueprint(str(workspace / "blueprint.aero"))
 
     # --validation-only: skip the build entirely and just run the suite.
@@ -194,6 +232,36 @@ def _run_validation_stage(context: dict, workspace: Path) -> int:
         print("[validation] FAILED (gatekeeper) -> build marked unsuccessful")
         return 1
     return 0
+
+
+def check_command(args: argparse.Namespace) -> int:
+    """Strictly validate a block-format ``blueprint.aero`` without building.
+
+    Prints an ultra-clear ``line:column`` + ``^`` diagnostic on failure and
+    exits non-zero, so it can gate a build pipeline.
+    """
+    import blueprint_lang
+
+    workspace = Path(args.workspace).resolve()
+    bp_path = Path(args.blueprint) if args.blueprint else workspace / "blueprint.aero"
+    if not bp_path.exists():
+        print(f"{bp_path}: blueprint file not found", file=sys.stderr)
+        return 1
+
+    source = bp_path.read_text(encoding="utf-8")
+    if source.strip() and not blueprint_lang.looks_like_blueprint_dsl(source):
+        print(
+            f"{bp_path}: legacy INI/JSON blueprint detected; the strict DSL "
+            "checker only validates block-format blueprints, so nothing to check."
+        )
+        return 0
+
+    error = blueprint_lang.check_source(source, filename=str(bp_path))
+    if error is None:
+        print(f"{bp_path}: OK -- blueprint is valid")
+        return 0
+    print(error, file=sys.stderr)
+    return 1
 
 
 def evolve_command(args: argparse.Namespace) -> int:
@@ -481,6 +549,14 @@ def create_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("--runtime-feedback", action="store_true", help="Run the runtime benchmark after building")
     build_parser.add_argument("--validation-only", action="store_true", help="Skip the build; only run the validation suite")
     build_parser.set_defaults(handler=build_command)
+
+    # --- check (strict blueprint validation, no build) ---
+    check_parser = subparsers.add_parser(
+        "check", help="Strictly validate a block-format blueprint.aero (no build)"
+    )
+    check_parser.add_argument("--workspace", default=".", help="Workspace root containing blueprint.aero")
+    check_parser.add_argument("--blueprint", default=None, help="Explicit path to a blueprint file")
+    check_parser.set_defaults(handler=check_command)
 
     # --- evolve ---
     evolve_parser = subparsers.add_parser("evolve", help="Run the self-evolution bootstrap engine")
