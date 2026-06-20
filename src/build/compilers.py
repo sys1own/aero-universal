@@ -88,8 +88,14 @@ class CompilerBackend(ABC):
         flags: Sequence[str] = (),
         defines: Sequence[str] = (),
         workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
-        """Construct the full command-line argument list."""
+        """Construct the full command-line argument list.
+
+        ``options`` carries backend-specific extras (e.g. the Rust backend's
+        ``manifest_path`` / ``root`` / ``cargo`` settings); backends that do not
+        need them simply ignore the argument.
+        """
 
     def compile(
         self,
@@ -99,6 +105,7 @@ class CompilerBackend(ABC):
         flags: Sequence[str] = (),
         defines: Sequence[str] = (),
         workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> CompileResult:
         """Discover the compiler, build the command, execute, return result."""
         binary = self.discover()
@@ -110,7 +117,7 @@ class CompilerBackend(ABC):
                 stderr=f"no {self.language} compiler found on PATH",
                 return_code=-1,
             )
-        cmd = self.build_command(sources, output, flags, defines, workdir)
+        cmd = self.build_command(sources, output, flags, defines, workdir, options)
         return self._run(target_name, cmd, workdir)
 
     def _run(
@@ -118,8 +125,13 @@ class CompilerBackend(ABC):
         target_name: str,
         cmd: List[str],
         workdir: Optional[Path] = None,
+        env: Optional[Dict[str, str]] = None,
     ) -> CompileResult:
         cwd = str(workdir) if workdir else None
+        run_env: Optional[Dict[str, str]] = None
+        if env:
+            run_env = dict(os.environ)
+            run_env.update(env)
         try:
             proc = subprocess.run(
                 cmd,
@@ -127,6 +139,7 @@ class CompilerBackend(ABC):
                 text=True,
                 timeout=300,
                 cwd=cwd,
+                env=run_env,
             )
             return CompileResult(
                 target_name=target_name,
@@ -179,6 +192,7 @@ class CCompiler(CompilerBackend):
         flags: Sequence[str] = (),
         defines: Sequence[str] = (),
         workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         binary = self.discover() or "gcc"
         cmd: List[str] = [binary]
@@ -208,6 +222,7 @@ class CppCompiler(CompilerBackend):
         flags: Sequence[str] = (),
         defines: Sequence[str] = (),
         workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         binary = self.discover() or "g++"
         cmd: List[str] = [binary]
@@ -226,6 +241,19 @@ class CppCompiler(CompilerBackend):
 
 
 class RustCompiler(CompilerBackend):
+    """Rust backend that respects user manifests and supports subdir crates.
+
+    Build behaviour (see :mod:`src.build.cargo_manifest`):
+
+    * if a ``Cargo.toml`` already exists at the crate root -- discovered from the
+      sources, or pointed at via ``manifest_path`` / ``root`` -- it is used
+      verbatim (no manifest is synthesised, so pinned/older deps are honoured);
+    * otherwise a manifest is synthesised, with dependency versions taken from
+      the blueprint's ``cargo.dependencies`` block;
+    * ``cargo`` is always run from the resolved crate root, and artefacts are
+      collected from *that* crate's ``target/`` directory.
+    """
+
     language = "rust"
 
     def discover(self) -> Optional[str]:
@@ -241,21 +269,116 @@ class RustCompiler(CompilerBackend):
         flags: Sequence[str] = (),
         defines: Sequence[str] = (),
         workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
+        options = options or {}
         binary = self.discover() or "cargo"
         if os.path.basename(binary) == "cargo":
             cmd: List[str] = [binary, "build"]
-            if flags:
-                cmd.append("--")
-                cmd.extend(flags)
+            manifest_path = options.get("manifest_path")
+            if manifest_path:
+                cmd.extend(["--manifest-path", str(manifest_path)])
+            if options.get("release") or "--release" in flags:
+                cmd.append("--release")
+            # Remaining flags are cargo-level flags (e.g. --features ...).
+            cmd.extend(f for f in flags if f != "--release")
             return cmd
-        # rustc fallback
+        # rustc fallback (no manifest / cargo): compile the sources directly.
         cmd = [binary]
         cmd.extend(flags)
         cmd.extend(sources)
         if output:
             cmd.extend(["-o", output])
         return cmd
+
+    def compile(
+        self,
+        target_name: str,
+        sources: Sequence[str],
+        output: Optional[str] = None,
+        flags: Sequence[str] = (),
+        defines: Sequence[str] = (),
+        workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
+    ) -> CompileResult:
+        binary = self.discover()
+        if binary is None:
+            return CompileResult(
+                target_name=target_name,
+                success=False,
+                command=[],
+                stderr="no rust compiler found on PATH (need cargo or rustc)",
+                return_code=-1,
+            )
+
+        # Without cargo we cannot honour manifests; fall back to plain rustc.
+        if os.path.basename(binary) != "cargo":
+            return super().compile(target_name, sources, output, flags, defines, workdir, options)
+
+        from src.build.cargo_manifest import extract_cargo_options, prepare_crate
+
+        options = options or {}
+        workspace = Path(workdir) if workdir else Path.cwd()
+        # Merge the nested ``cargo`` object (JSON) and the flat
+        # ``cargo_dependencies`` form (block-DSL/INI) into one options dict.
+        cargo_options = extract_cargo_options(options)
+
+        try:
+            plan = prepare_crate(
+                workspace=workspace,
+                target_name=target_name,
+                sources=sources,
+                cargo_options=cargo_options,
+                manifest_path=options.get("manifest_path"),
+                root=options.get("root"),
+            )
+        except OSError as exc:
+            return CompileResult(
+                target_name=target_name,
+                success=False,
+                command=[],
+                stderr=f"failed to prepare cargo crate: {exc}",
+                return_code=-1,
+            )
+
+        release = bool(options.get("release")) or "--release" in flags
+        cmd = self.build_command(
+            sources,
+            output,
+            flags,
+            defines,
+            plan.crate_root,
+            {"manifest_path": str(plan.manifest_path), "release": release},
+        )
+
+        # Resolve (portable-by-default, customisable) RUSTFLAGS to inject.
+        from src.build.rustflags import resolve_rustflags
+
+        decision = resolve_rustflags(
+            optimization=options.get("optimization"),
+            rustflags=options.get("rustflags"),
+        )
+        env = decision.env()
+
+        # Run cargo from the crate root so subdirectory crates build correctly.
+        result = self._run(target_name, cmd, plan.crate_root, env=env or None)
+        # Collect artefacts from *this* crate's target/ directory.
+        result.output_path = str(plan.profile_dir(release))
+        result.details.update(plan.to_dict())
+        result.details["language"] = "rust"
+        result.details["artifact_dir"] = str(plan.profile_dir(release))
+        result.details["release"] = release
+        result.details["command"] = cmd
+        result.details["rustflags"] = decision.to_dict()
+        result.details["env"] = dict(env)
+        # The declared dependencies that fed the manifest (for debug + error analysis).
+        result.details["declared_dependencies"] = dict(cargo_options.get("dependencies", {}) or {})
+        # A preview of the manifest actually used (read back from disk).
+        try:
+            result.details["manifest"] = plan.manifest_path.read_text(encoding="utf-8")
+        except OSError:
+            result.details["manifest"] = ""
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -282,6 +405,7 @@ class PythonRuntime(CompilerBackend):
         flags: Sequence[str] = (),
         defines: Sequence[str] = (),
         workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         binary = self.discover() or "python3"
         cmd: List[str] = [binary, "-m", "py_compile"]
@@ -307,6 +431,7 @@ class NodeRuntime(CompilerBackend):
         flags: Sequence[str] = (),
         defines: Sequence[str] = (),
         workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         binary = self.discover() or "node"
         cmd: List[str] = [binary, "--check"]
@@ -338,6 +463,7 @@ class FortranCompiler(CompilerBackend):
         flags: Sequence[str] = (),
         defines: Sequence[str] = (),
         workdir: Optional[Path] = None,
+        options: Optional[Dict[str, Any]] = None,
     ) -> List[str]:
         binary = self.discover() or "gfortran"
         cmd: List[str] = [binary]
@@ -380,6 +506,7 @@ def compile_target(
     flags: Sequence[str] = (),
     defines: Sequence[str] = (),
     workdir: Optional[Path] = None,
+    options: Optional[Dict[str, Any]] = None,
 ) -> CompileResult:
     """One-shot: look up the backend and compile a target."""
     backend = get_backend(language)
@@ -391,4 +518,4 @@ def compile_target(
             stderr=f"unsupported language: {language}",
             return_code=-1,
         )
-    return backend.compile(target_name, sources, output, flags, defines, workdir)
+    return backend.compile(target_name, sources, output, flags, defines, workdir, options)

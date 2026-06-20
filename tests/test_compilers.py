@@ -94,9 +94,11 @@ class TestRustCompiler(unittest.TestCase):
         rc = RustCompiler()
         binary = rc.discover()
         if binary and "cargo" in binary:
+            # --release is a cargo build flag (passed to `cargo build`, not after
+            # a `--` separator, which would forward it to the built binary).
             cmd = rc.build_command(["src/lib.rs"], flags=["--release"])
-            self.assertIn("--", cmd)
             self.assertIn("--release", cmd)
+            self.assertEqual(cmd[:2], [binary, "build"])
 
 
 class TestPythonRuntime(unittest.TestCase):

@@ -63,6 +63,31 @@ def normalise_stderr(stderr: str, max_lines: int = 40) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _diagnose(result: CompileResult) -> Optional[List[str]]:
+    """Run language-specific root-cause analysis for a failed result.
+
+    Currently Rust-aware: turns a cryptic "method not found" / unresolved-import
+    failure into a version-mismatch hypothesis with the actual version in use.
+    """
+    details = result.details or {}
+    if details.get("language") != "rust":
+        return None
+    try:
+        from pathlib import Path
+
+        from src.build.error_analysis import analyze_rust_error
+
+        crate_root = details.get("crate_root")
+        diagnosis = analyze_rust_error(
+            result.stderr,
+            dependencies=details.get("declared_dependencies"),
+            crate_root=Path(crate_root) if crate_root else None,
+        )
+    except Exception:  # noqa: BLE001 - analysis must never break error reporting
+        return None
+    return diagnosis.render() if diagnosis else None
+
+
 def handle_compile_results(
     results: Sequence[CompileResult],
     ui: AeroUI,
@@ -70,7 +95,7 @@ def handle_compile_results(
     """Process a batch of compile results, report errors, return exit code.
 
     * For each failed result, prints a formatted ``Aero Build Failure``
-      block via the UI.
+      block via the UI, enriched with root-cause suggestions where available.
     * Returns 0 if every result succeeded, 1 otherwise.
     """
     failures: List[CompileResult] = []
@@ -79,7 +104,7 @@ def handle_compile_results(
             continue
         failures.append(result)
         cleaned = normalise_stderr(result.stderr)
-        ui.build_failure_report(result.target_name, cleaned)
+        ui.build_failure_report(result.target_name, cleaned, suggestions=_diagnose(result))
 
     if not failures:
         return 0

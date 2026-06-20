@@ -166,6 +166,36 @@ def build_command(args: argparse.Namespace) -> int:
     return _run_validation_stage(context, workspace)
 
 
+def _print_build_debug(ui: "AeroUI", name: str, language: str, result) -> None:
+    """Print --debug detail for a compiled target (manifest, command, env, deps).
+
+    Surfaces exactly what Aero used so version-mismatch and RUSTFLAGS issues are
+    diagnosable without guesswork (Rust targets carry the richest detail).
+    """
+    details = result.details or {}
+    ui.debug(f"{name}: language={language or 'unknown'}")
+    command = details.get("command")
+    if command:
+        ui.debug(f"{name}: cargo command: {' '.join(str(c) for c in command)}")
+    env = details.get("env") or {}
+    if env:
+        ui.debug(f"{name}: env: " + " ".join(f"{k}={v}" for k, v in env.items()))
+    else:
+        ui.debug(f"{name}: env: (no RUSTFLAGS injected)")
+    rustflags = details.get("rustflags") or {}
+    if rustflags:
+        ui.debug(f"{name}: RUSTFLAGS policy: {rustflags.get('reason', '')}")
+    if "crate_root" in details:
+        origin = "existing" if details.get("used_existing") else "synthesised"
+        ui.debug(f"{name}: crate root: {details['crate_root']} (manifest: {origin})")
+    deps = details.get("declared_dependencies")
+    if deps:
+        ui.debug(f"{name}: dependencies: " + ", ".join(f"{k}={v}" for k, v in deps.items()))
+    manifest = details.get("manifest")
+    if manifest:
+        ui.debug_block(f"{name}: Cargo.toml in use", manifest.rstrip().splitlines())
+
+
 def _build_dsl_targets(
     context: dict,
     workspace: Path,
@@ -208,6 +238,10 @@ def _build_dsl_targets(
     # Phase 4: Compiling each target
     results: list[CompileResult] = []
     meta_by_name = {m["name"]: m for m in target_metadata}
+    debug = bool(getattr(args, "debug", False) or getattr(args, "verbose", False))
+    # A build-level optimization intent (e.g. from the invisible-config `optimize`
+    # word) is used as the default when a target does not set its own.
+    build_optimize = (context.get("inferred_dag") or {}).get("optimize") or context.get("optimize")
 
     for name in build_order:
         meta = meta_by_name.get(name, {})
@@ -218,6 +252,17 @@ def _build_dsl_targets(
         defines = meta.get("defines", [])
         optional = meta.get("optional", False)
 
+        # Backend-specific options (e.g. Rust manifest_path / root / cargo deps,
+        # and RUSTFLAGS control via optimization / rustflags).
+        options = {
+            "manifest_path": meta.get("manifest_path"),
+            "root": meta.get("root"),
+            "cargo": meta.get("cargo"),
+            "cargo_dependencies": meta.get("cargo_dependencies"),
+            "optimization": meta.get("optimization") or build_optimize,
+            "rustflags": meta.get("rustflags"),
+        }
+
         ui.compiling(name, language)
         result = compile_target(
             target_name=name,
@@ -227,8 +272,12 @@ def _build_dsl_targets(
             flags=flags,
             defines=defines,
             workdir=workspace,
+            options=options,
         )
         results.append(result)
+
+        if debug:
+            _print_build_debug(ui, name, language, result)
 
         if result.success:
             ui.compiled(name, language)
@@ -872,23 +921,48 @@ def infer_command(args: argparse.Namespace) -> int:
         print(json.dumps(dag.to_dict(), indent=2))
         return 0
 
-    print(f"\nInferred build graph for '{dag.project}' (optimize={dag.optimize}):")
+    from src.build.rustflags import resolve_rustflags
+
+    print(f"\nInferred build graph for '{dag.project}'  (mode: zero-config / invisible)")
+    print(f"  optimize intent  : {dag.optimize}")
     if dag.has_invariants:
-        print(f"  text invariants  : {len(dag.ingest)} ingested source(s) -> {', '.join(dag.ingest)}")
-    print("  targets:")
+        print(f"  text invariants  : extracted from {len(dag.ingest)} ingested file(s):")
+        for path in dag.ingest:
+            print(f"      • {path}")
+        print("      → every compiled 'core' target is made to depend on these invariants")
+    else:
+        print("  text invariants  : (none ingested)")
+
+    print("\n  targets — what was detected and why:")
     for target in dag.targets:
         deps = ", ".join(target.depends_on) or "(none)"
-        print(f"    - {target.name} [{target.language}/{target.role}] "
-              f"{len(target.sources)} source(s); depends on: {deps}")
-    print("  ffi / language boundaries:")
+        print(f"    ▸ {target.name}  [{target.language} / {target.role}]")
+        print(f"        language : {target.language}  ({target.language_reason})")
+        if target.sources:
+            shown = ", ".join(target.sources[:4]) + (" …" if len(target.sources) > 4 else "")
+            print(f"        sources  : {len(target.sources)} file(s) — {shown}")
+        else:
+            print("        sources  : none found by scanning the project tree")
+        print(f"        depends  : {deps}")
+        if target.language == "rust":
+            decision = resolve_rustflags(optimization=dag.optimize)
+            flags = decision.value if decision.inject else "(none — portable)"
+            print(f"        rustflags: {flags}  [{decision.reason}]")
+
+    print("\n  ffi / language boundaries (auto-detected):")
     if dag.ffi_boundaries:
         for boundary in dag.ffi_boundaries:
-            print(f"    - {boundary.provider} ({boundary.provider_language}) -> "
-                  f"{boundary.consumer} ({boundary.consumer_language}) via {boundary.mechanism}")
+            print(f"    ▸ {boundary.provider} ({boundary.provider_language}) → "
+                  f"{boundary.consumer} ({boundary.consumer_language})  via {boundary.mechanism}")
+            print(f"        reason: '{boundary.consumer}' is a dynamic layer that binds the "
+                  f"compiled '{boundary.provider}' core")
     else:
-        print("    (none)")
-    print(f"  execution order  : {' -> '.join(dag.topological_order())}")
-    print("  self-healing     : enabled (auto-patches glue-code type mismatches, retries)")
+        print("    (none — no compiled core + dynamic consumer pair found)")
+
+    print(f"\n  execution order  : {' → '.join(dag.topological_order())}")
+    print("  self-healing     : enabled (auto-patches glue-code type mismatches, then retries)")
+    print("\n  This is zero-config mode: nothing above was written by you — Aero inferred it")
+    print("  from the file tree. Add an explicit blueprint to override any of it.")
     return 0
 
 
@@ -979,6 +1053,11 @@ def create_parser() -> argparse.ArgumentParser:
         help="Seconds between telemetry refreshes",
     )
     build_parser.add_argument("--verbose", action="store_true", help="Enable debug logging")
+    build_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print the synthesised manifest, exact cargo command + env (RUSTFLAGS), and detected deps",
+    )
     build_parser.add_argument("--no-hpc", action="store_true", help="Force a local build, ignoring [hpc] settings")
     build_parser.add_argument("--no-evolution", action="store_true", help="Skip the self-evolution pass after building")
     build_parser.add_argument("--no-hardware-probe", action="store_true", help="Skip hardware profiling at build start")

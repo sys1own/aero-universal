@@ -389,7 +389,11 @@ class TestInferCli(unittest.TestCase):
             text = out.getvalue()
             self.assertIn("biophysical_trader", text)
             self.assertIn("pybind11", text)
-            self.assertIn("cpp_core -> python_dashboard", text)
+            self.assertIn("cpp_core", text)
+            self.assertIn("python_dashboard", text)
+            # The richer output explains detection and execution order.
+            self.assertIn("execution order", text)
+            self.assertIn("zero-config", text)
 
     def test_infer_json_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
