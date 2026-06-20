@@ -74,6 +74,10 @@ SCHEMAS: Dict[str, BlockSchema] = {
             # Pin dependency versions for a synthesised manifest, as a flat list
             # of "name=version" entries, e.g. cargo_dependencies = ["rug=0.22"].
             "cargo_dependencies": _STRING_LIST,
+            # Control RUSTFLAGS injection: optimization = "none" | "generic" |
+            # "native" | "size", or rustflags = ["-C", "target-cpu=generic"].
+            "optimization": _STRING,
+            "rustflags": _STRING_LIST,
         },
         required=("language", "sources"),
     ),

@@ -74,6 +74,7 @@ class InferredTarget:
     role: str  # "core" | "binding" | "library"
     sources: List[str] = field(default_factory=list)
     depends_on: List[str] = field(default_factory=list)
+    language_reason: str = ""  # why this language was chosen (for `infer` / debug)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -82,6 +83,7 @@ class InferredTarget:
             "role": self.role,
             "sources": list(self.sources),
             "depends_on": list(self.depends_on),
+            "language_reason": self.language_reason,
         }
 
 
@@ -192,14 +194,22 @@ class DAGInferenceEngine:
 
     def _infer_target(self, name: str) -> InferredTarget:
         language = self._infer_language(name)
+        reason = ""
+        if language != "unknown":
+            reason = f"target name '{name}' matches a {language} naming hint"
         sources = self._locate_sources(name, language)
         # If the name implied nothing but sources exist, refine the language.
         if language == "unknown" and sources:
             language = self._language_from_paths(sources)
+            if language != "unknown":
+                reason = f"dominant source extension under '{name}' is {language}"
         if language == "unknown":
             language = "python"  # safest default: a scripting/driver layer
+            reason = "no name hint or sources matched; defaulted to python (driver layer)"
         role = "core" if language in _COMPILED_LANGUAGES else "binding"
-        return InferredTarget(name=name, language=language, role=role, sources=sources)
+        return InferredTarget(
+            name=name, language=language, role=role, sources=sources, language_reason=reason
+        )
 
     def _infer_language(self, name: str) -> str:
         lowered = name.lower()

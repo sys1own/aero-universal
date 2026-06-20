@@ -43,6 +43,9 @@ class TargetNode:
     root: Optional[str] = None
     # Pin dependency versions for a synthesised manifest ("name=version" entries).
     cargo_dependencies: List[str] = field(default_factory=list)
+    # RUSTFLAGS control: an optimization word and/or explicit rustflags.
+    optimization: Optional[str] = None
+    rustflags: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
         d: Dict[str, Any] = {
@@ -65,6 +68,10 @@ class TargetNode:
             d["root"] = self.root
         if self.cargo_dependencies:
             d["cargo_dependencies"] = self.cargo_dependencies
+        if self.optimization:
+            d["optimization"] = self.optimization
+        if self.rustflags:
+            d["rustflags"] = self.rustflags
         return d
 
 
@@ -288,6 +295,8 @@ def blueprint_to_dag(blueprint: Blueprint) -> BuildGraph:
             manifest_path=_extract_string(block, "manifest_path") or None,
             root=_extract_string(block, "root") or None,
             cargo_dependencies=_extract_string_list(block, "cargo_dependencies"),
+            optimization=_extract_string(block, "optimization") or None,
+            rustflags=_extract_string_list(block, "rustflags"),
         )
         targets[node.name] = node
         dep_map[node.name] = requires

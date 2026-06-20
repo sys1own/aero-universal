@@ -144,6 +144,33 @@ rustup default stable
 
 The Aero Multi‑Tool supports **four blueprint formats**: the ultra‑lean **Invisible Configuration Layer** (a few lines of pure intent — everything else inferred), the declarative **block DSL** (strictly validated before the build), modern **JSON**, and legacy **INI** (for backward compatibility).
 
+### Zero‑config (invisible) vs. explicit blueprints
+
+There are two ways to drive Aero, and it's worth being clear about which you're in:
+
+| | **Zero‑config (invisible)** | **Explicit blueprint** |
+|---|---|---|
+| **What you write** | A few lines of intent: `project`, `ingest`, `targets`, `optimize`. | Full `target` blocks with `language`, `sources`, `requires`, etc. |
+| **Who decides the build** | Aero **infers** languages, the DAG, FFI boundaries and error‑correction loops by scanning the project tree. | **You** declare everything; Aero builds exactly what's written. |
+| **Format** | The lean dialect (no `[`, `{`, or `"name" {`). | Block DSL, JSON, or INI. |
+| **Best for** | Getting started, prototypes, "just build it". | Reproducible builds, subdirectory crates, pinned versions, CI. |
+| **See exactly what it did** | `aero infer` (explains every detection). | `aero check` (validates) + `aero build --debug`. |
+
+**Rules of thumb:**
+
+- If `blueprint.aero` contains only `project "name"` plus flat `key = value`
+  lines, Aero is in **zero‑config** mode — run `aero infer` to see precisely
+  what it detected and why before building.
+- The moment you need to **pin a dependency version, point at a subdirectory
+  crate, or control RUSTFLAGS**, switch to an **explicit** `target` block (block
+  DSL or JSON) — those knobs live on the target.
+- Both modes converge on the same internal build graph, so you can start
+  zero‑config and graduate to explicit without changing tools.
+- When a build fails, run `aero build --debug` to print the synthesised
+  manifest, the exact `cargo` command, the injected environment (RUSTFLAGS),
+  and the detected dependencies. For Rust "method not found" failures, Aero also
+  prints a **root‑cause hypothesis** with the actual dependency version in use.
+
 ### Invisible Configuration Layer (ultra-lean)
 
 Shrink the whole blueprint to a few lines of **semantic intent**. The tool infers
@@ -303,7 +330,7 @@ target "bindings" {
 **Validation rules.** Exactly one `project` block; at least one `target`; only
 known keys per block (`target`: `language`, `sources`, `requires`, `flags`,
 `defines`, `output`, `optional`, and the Rust/Cargo keys `manifest_path`,
-`root`, `cargo_dependencies`); required keys present (`project.version`,
+`root`, `cargo_dependencies`, `optimization`, `rustflags`); required keys present (`project.version`,
 `target.language`, `target.sources`); `language` ∈ `{c, cpp, fortran, python,
 rust}`; unique target names; every `requires` entry must reference a real
 target; and the `requires` graph must be **acyclic**.
@@ -404,6 +431,65 @@ synthesised manifest's `[dependencies]`. Neither is consulted when a
 > `Cargo.toml` found above the sources → the source directory (its parent if the
 > sources sit in `src/`) → the workspace root. A synthesised manifest carries a
 > header noting that committing your own `Cargo.toml` gives you full control.
+
+#### Controlling RUSTFLAGS (portable by default)
+
+Aero injects `RUSTFLAGS` for Rust targets, but **defaults to injecting nothing**
+so builds stay portable across CPUs, CI fleets and cross‑compiles. You opt into
+tuning, or take full control, per target:
+
+| Setting | Effect |
+|---------|--------|
+| *(unset)* | No `RUSTFLAGS` injected — portable. |
+| `optimization = "none"` | Explicitly inject nothing (and pass any host `RUSTFLAGS` through). |
+| `optimization = "generic"` | `-C target-cpu=generic` (portable, still tuned). |
+| `optimization = "native"` | `-C target-cpu=native` (fastest on *this* host; not portable). |
+| `optimization = "size"` | `-C opt-level=z`. |
+| `rustflags = ["-C", "target-cpu=generic"]` | Used **verbatim**, overriding `optimization`. |
+
+In zero‑config mode the top‑level `optimize` word feeds this too
+(`optimize = "maximum_hardware"` ⇒ `target-cpu=native`). If a host rejects the
+injected flags (e.g. an unknown `target-cpu`), set `optimization = "none"` or a
+`generic` profile.
+
+```aero
+target "engine" {
+    language     = "rust"
+    sources      = ["crates/engine/src/lib.rs"]
+    root         = "crates/engine"
+    optimization = "none"                       # or: rustflags = ["-C", "target-cpu=generic"]
+}
+```
+
+#### Debugging a build
+
+`aero build --debug` prints, per target, exactly what Aero used — so version
+mismatches and RUSTFLAGS surprises are diagnosable at a glance:
+
+```text
+[Debug] engine: cargo command: cargo build --manifest-path crates/engine/Cargo.toml
+[Debug] engine: env: RUSTFLAGS=-C target-cpu=generic
+[Debug] engine: crate root: .../crates/engine (manifest: existing)
+[Debug] engine: dependencies: rug=0.22
+[Debug] engine: Cargo.toml in use
+        [package] …
+```
+
+When a Rust build fails with a *method‑not‑found* error (a classic
+version‑mismatch symptom), Aero appends a root‑cause hypothesis naming the
+**actual version in use**:
+
+```text
+Aero Build Failure
+  error[E0599]: no method named `neg_mut` found for struct `rug::Integer` …
+
+  Possible cause (Aero analysis):
+    → method `neg_mut` not found on type `rug::Integer`
+    → likely cause: a version mismatch — `neg_mut` is not part of the API of `rug::Integer` …
+    → crate `rug` in use: 1.24.0 (resolved) — declared as "0.22"
+    → check whether `neg_mut` exists in that version of `rug`; if not, pin a compatible
+      version, e.g. cargo_dependencies = ["rug=<version>"], then rebuild.
+```
 
 ### INI Format (Legacy)
 

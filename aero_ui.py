@@ -51,6 +51,8 @@ _TAG_COLORS = {
     "Warning": _YELLOW,
     "Info": _CYAN,
     "Plan": _CYAN,
+    "Debug": _DIM,
+    "Hint": _YELLOW,
 }
 
 _TAG_WIDTH = 13  # pad tag to consistent width
@@ -169,6 +171,15 @@ class AeroUI:
     def info(self, message: str) -> None:
         self.tag("Info", message)
 
+    def debug(self, message: str) -> None:
+        self.tag("Debug", message)
+
+    def debug_block(self, title: str, lines: List[str]) -> None:
+        """Print a titled, indented block of debug detail (e.g. a manifest)."""
+        self.tag("Debug", _format_bold(title))
+        for line in lines:
+            self._write(f"  {_format_dim(line)}")
+
     def warning(self, message: str) -> None:
         self.tag("Warning", message)
 
@@ -177,8 +188,14 @@ class AeroUI:
 
     # -- error report ------------------------------------------------------
 
-    def build_failure_report(self, target_name: str, stderr: str) -> None:
-        """Print a formatted compiler-error report under a clear header."""
+    def build_failure_report(
+        self, target_name: str, stderr: str, suggestions: Optional[List[str]] = None
+    ) -> None:
+        """Print a formatted compiler-error report under a clear header.
+
+        ``suggestions`` (e.g. from the Rust error analyser) are rendered in a
+        highlighted "Possible cause" block beneath the raw compiler output.
+        """
         self._write("")
         self._write(f"{_format_error_header('Aero Build Failure')}")
         self._write(f"{_format_error_header('─' * 40)}")
@@ -186,6 +203,11 @@ class AeroUI:
         self._write("")
         for line in stderr.splitlines():
             self._write(f"  {line}")
+        if suggestions:
+            self._write("")
+            self._write(f"  {_BOLD}{_YELLOW}Possible cause (Aero analysis):{_RESET}")
+            for line in suggestions:
+                self._write(f"    {_YELLOW}→{_RESET} {line}")
         self._write("")
         self._write(f"{_format_error_header('─' * 40)}")
 
