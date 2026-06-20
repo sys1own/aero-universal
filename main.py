@@ -96,6 +96,10 @@ def build_command(args: argparse.Namespace) -> int:
     # Context ingestion runs before the build so imported sources are present.
     _run_ingestion_stage(context, workspace)
 
+    # Domain-agnostic semantic fluidity: ingest unstructured context into the
+    # Invariant Schema, exposed to code generator nodes as a compilation input.
+    _maybe_run_semantic_fluidity(workspace)
+
     # Hardware profiling at the start of the build cycle (feature #6).
     if not getattr(args, "no_hardware_probe", False):
         _maybe_hardware_probe(workspace)
@@ -244,6 +248,37 @@ def _run_ingestion_stage(context: dict, workspace: Path) -> None:
               f"repaired {report['files_repaired']}, errors {len(report['errors'])}")
     except Exception as exc:  # noqa: BLE001 - ingestion must not abort the build
         print(f"[context] ingestion failed: {exc}")
+
+
+def _maybe_run_semantic_fluidity(workspace: Path) -> None:
+    """Ingest unstructured context (papers, prose, code) into the Invariant
+    Schema and write it to the workspace as a high-level compilation input for
+    downstream code generator nodes.  Opt-in via blueprint_config.json's
+    ``semantic_fluidity`` section; never aborts the build on failure.
+    """
+    config = _workspace_json_config(workspace)
+    fluidity_cfg = config.get("semantic_fluidity", {})
+    if not fluidity_cfg.get("enabled"):
+        return
+    source_dir = workspace / fluidity_cfg.get("source_dir", "context_sources")
+    if not source_dir.exists():
+        return
+    from src.semantic_fluidity import ContextIngestionEngine
+
+    print(f"\n[semantic-fluidity] ingesting {source_dir}...")
+    try:
+        engine = ContextIngestionEngine()
+        output_path = workspace / ContextIngestionEngine.REPORT_NAME
+        payload = engine.ingest_and_export(source_dir, output_path)
+        schema = payload["invariant_schema"]
+        print(
+            f"[semantic-fluidity] {len(schema['domains'])} domain(s), "
+            f"{len(schema['state_variables'])} state var(s), "
+            f"{len(schema['equations'])} equation(s), "
+            f"{len(schema['boundaries'])} boundary rule(s) -> {output_path}"
+        )
+    except Exception as exc:  # noqa: BLE001 - ingestion must not abort the build
+        print(f"[semantic-fluidity] ingestion skipped: {exc}")
 
 
 def _maybe_hardware_probe(workspace: Path) -> None:
@@ -693,6 +728,44 @@ def ingest_command(args: argparse.Namespace) -> int:
     return 0 if not report["errors"] else 1
 
 
+def invariants_command(args: argparse.Namespace) -> int:
+    """Ingest unstructured context + source files into the Invariant Schema.
+
+    Reads every .txt/.md/.pdf/.json/.cpp/.py file under --source-dir, extracts
+    state variables, algorithmic boundaries and equations per domain, and
+    writes the result (plus the cross-domain system graph) as a JSON
+    compilation input for downstream code generator nodes.
+    """
+    from src.semantic_fluidity import ContextIngestionEngine
+
+    source_dir = Path(args.source_dir)
+    if not source_dir.exists():
+        print(f"{source_dir}: directory not found", file=sys.stderr)
+        return 1
+
+    workspace = Path(args.workspace).resolve()
+    output_path = Path(args.output) if args.output else workspace / ContextIngestionEngine.REPORT_NAME
+
+    engine = ContextIngestionEngine()
+    payload = engine.ingest_and_export(source_dir, output_path)
+    schema = payload["invariant_schema"]
+
+    print("\nSemantic Fluidity Ingestion:")
+    print(f"  domains          : {', '.join(schema['domains']) or '(none)'}")
+    print(f"  state variables  : {len(schema['state_variables'])}")
+    print(f"  boundaries       : {len(schema['boundaries'])}")
+    print(f"  equations        : {len(schema['equations'])}")
+    print(f"  system graph     : {payload['graph_statistics']['node_count']} node(s), "
+          f"{payload['graph_statistics']['edge_count']} edge(s), "
+          f"{payload['graph_statistics']['cross_domain_edges']} cross-domain edge(s)")
+    if payload["ingestion_errors"]:
+        print("  errors:")
+        for err in payload["ingestion_errors"]:
+            print(f"    ! {err}")
+    print(f"  report           : {output_path}")
+    return 0
+
+
 def runtime_command(args: argparse.Namespace) -> int:
     """Run the runtime benchmark and print collected metrics."""
     from src.runtime.feedback import RuntimeFeedback
@@ -809,6 +882,15 @@ def create_parser() -> argparse.ArgumentParser:
     ingest_parser.add_argument("--workspace", default=".", help="Workspace root to ingest into")
     ingest_parser.add_argument("--config", default=None, help="Path to blueprint_config.json")
     ingest_parser.set_defaults(handler=ingest_command)
+
+    # --- invariants (semantic fluidity) ---
+    invariants_parser = subparsers.add_parser(
+        "invariants", help="Ingest unstructured context + code into the Invariant Schema"
+    )
+    invariants_parser.add_argument("--source-dir", required=True, help="Directory of mixed context files to ingest")
+    invariants_parser.add_argument("--workspace", default=".", help="Workspace root (used to resolve the default report path)")
+    invariants_parser.add_argument("--output", default=None, help="Explicit path for the invariant_schema_report.json")
+    invariants_parser.set_defaults(handler=invariants_command)
 
     # --- hpc ---
     hpc_parser = subparsers.add_parser("hpc", help="Generate or submit an HPC build job")
