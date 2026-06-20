@@ -295,6 +295,7 @@ The `main.py` script provides several subcommands:
 | `validate` | Run the validation suite and report results |
 | `runtime` | Execute runtime benchmarks and feed back into fitness |
 | `invariants` | Ingest unstructured context + code into the domain‑agnostic Invariant Schema |
+| `polymorphize` | Inspect the host and polymorphically rewrite generated code for it (see [Autonomous Hardware-Polymerization](#autonomous-hardware-polymerization)) |
 
 ### Common Options
 
@@ -387,6 +388,78 @@ When enabled, `build` ingests `source_dir` and writes
 
 ---
 
+## Autonomous Hardware-Polymerization
+
+Aero inspects the host machine **at build time** and polymorphically rewrites
+the freshly generated C/C++/Rust source (or LLVM IR) to fit that exact
+machine — **before the compiler is invoked and with no flags from the user**.
+This is handled by the [`src/polymorphization`](src/polymorphization/) package
+(`HardwareProfiler` + `PolymorphicRewriter`, orchestrated by
+`PolymorphizationEngine`) and runs automatically as a build stage after code
+generation but before linking/execution.
+
+**1. `HardwareProfiler` — runtime topology probe (dependency-free).** Reads
+`/proc` + `sysfs` (and shells out only to tools already present, e.g.
+`nvidia-smi`/`vulkaninfo`), degrading to sane defaults when a source is
+unavailable. It discovers:
+
+- CPU vector features — AVX2, AVX-512, SSE, ARM NEON;
+- the **physical vs. logical** core split (for thread-pool sizing);
+- the L1/L2/L3 cache hierarchy and line sizes;
+- available GPU architectures (CUDA `sm_*`, then Vulkan/WebGPU);
+- total memory and a coarse memory-bandwidth class.
+
+> Note: this is distinct from the benchmark-driven
+> `src/hardware_profiling/profiler.py` (the `profile` command), which *times*
+> micro-benchmarks. The polymorphization profiler is purely introspective so it
+> is safe to run on every build.
+
+**2. `PolymorphicRewriter` — the rewrite pass.** Generated code uses neutral
+placeholders that the rewriter binds to the discovered host:
+
+| Placeholder | Rewritten to | Purpose |
+|-------------|--------------|---------|
+| `AERO_ALIGN` | e.g. `64` | Memory alignment = max(cache line, vector width) |
+| `AERO_WORKERS` | physical core count | Thread-pool worker count (ignores SMT siblings) |
+| `AERO_VECTOR_WIDTH` / `AERO_SIMD_LANES_F32` | e.g. `32` / `8` | Vector register width / lane counts |
+| `AERO_KERNEL(name)` | `name__avx512` / `name__avx2` / `name__neon` / `name__scalar` | Binds a baseline loop to the best target-specific micro-kernel |
+| `AERO_PRAGMA_SIMD` (marker line) | `#pragma omp simd simdlen(N)` (C/C++), `#[target_feature(enable = "avx2")]` (Rust), vectorize hint (LLVM IR) | Language-appropriate vectorization directive |
+
+**3. Transparent & non-destructive.** Rewriting happens entirely in memory
+(`engine.polymerize_text(...)`) or into an **ephemeral build cache**
+(`.aero/polymorph_cache/`, reset on each run) that mirrors the generated
+layout. The user's primary source directory is **never modified** — the
+downstream linker compiles the cache.
+
+**Run it standalone:**
+
+```bash
+python main.py polymorphize --profile-only                 # just print the host topology
+python main.py polymorphize --source-dir build_artifacts/  # rewrite into .aero/polymorph_cache
+```
+
+It runs automatically during `build`; opt out with `build --no-polymorph` or:
+
+```json
+{
+  "polymorphization": {
+    "enabled": false,
+    "source_dir": "build_artifacts",
+    "cache_dir": ".aero/polymorph_cache"
+  }
+}
+```
+
+```python
+from src.polymorphization import PolymorphizationEngine
+
+engine = PolymorphizationEngine()
+report = engine.polymerize_tree("build_artifacts/", ".aero/polymorph_cache")
+# report["topology"] describes the host; report["rewrite"] lists every edit.
+```
+
+---
+
 ## Output Artifacts
 
 After a successful build, you will find:
@@ -399,6 +472,7 @@ After a successful build, you will find:
 | Evolution checkpoints | `.aero/evolution_checkpoints/` | Population snapshots for each generation. |
 | Query cache | `.aero/query_cache/` | AST‑node‑level cached compilation units. |
 | Invariant Schema report | `invariant_schema_report.json` | Domain‑namespaced state variables/boundaries/equations + system graph (opt‑in, see [Semantic Fluidity Engine](#semantic-fluidity-engine)). |
+| Polymorphization cache | `.aero/polymorph_cache/` | Host‑specialised rewrites of the generated code + `hardware_topology.json` / `polymorphization_report.json` (ephemeral; see [Autonomous Hardware-Polymerization](#autonomous-hardware-polymerization)). |
 | Build manifest | `build_manifest.json` | Final configuration and performance metrics. |
 | Audit log | `WORKSPACE_AUDIT.md` | Human‑readable summary of the build. |
 
