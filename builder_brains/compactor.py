@@ -11,7 +11,6 @@ Pipeline entry point: evaluate(metadata, hyper_params)
 """
 import ast
 import hashlib
-import json
 import logging
 import math
 import os
@@ -19,25 +18,15 @@ import string
 import time
 from collections import Counter, defaultdict
 from typing import Any, Dict, List, Optional, Set, Tuple
+
+from builder_brains.manifest_utils import (
+    get_cost_ceilings,
+    get_module_params,
+    get_thresholds,
+    load_manifest,
+)
+
 logger = logging.getLogger('builder_brains.compactor')
-_MANIFEST_PATH = os.path.join(os.path.dirname(__file__), 'build_manifest.json')
-
-def _load_manifest() -> Dict[str, Any]:
-    try:
-        with open(_MANIFEST_PATH, 'r', encoding='utf-8') as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning('Failed to load build_manifest.json: %s — using defaults', exc)
-        return {}
-
-def _get_compactor_params(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('hyperparameter_weights', {}).get('compactor', {})
-
-def _get_thresholds(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('thresholds', {})
-
-def _get_cost_ceilings(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('execution_cost_ceilings', {})
 
 class StructuralTokenizer(ast.NodeVisitor):
     """Walk an AST and produce a frequency vector of node types plus depth stats."""
@@ -454,10 +443,10 @@ def evaluate(metadata: Dict[str, Any], hyper_params: Dict[str, Any]) -> Dict[str
     """
     start_time: float = time.monotonic()
     logger.info('Compactor pipeline started')
-    manifest: Dict[str, Any] = _load_manifest()
-    params: Dict[str, Any] = {**_get_compactor_params(manifest), **hyper_params}
-    thresholds: Dict[str, Any] = _get_thresholds(manifest)
-    ceilings: Dict[str, Any] = _get_cost_ceilings(manifest)
+    manifest: Dict[str, Any] = load_manifest()
+    params: Dict[str, Any] = {**get_module_params(manifest, 'compactor'), **hyper_params}
+    thresholds: Dict[str, Any] = get_thresholds(manifest)
+    ceilings: Dict[str, Any] = get_cost_ceilings(manifest)
     wall_limit: float = ceilings.get('compactor_max_wall_seconds', 30.0)
     source: str = metadata.get('source_code', '')
     if not source.strip():

@@ -21,7 +21,6 @@ is no worse than B in every objective and strictly better in at least one.
 
 Pipeline entry point: evaluate(metadata, hyper_params)
 """
-import json
 import logging
 import math
 import os
@@ -29,25 +28,15 @@ import random
 import time
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional, Sequence, Tuple
+
+from builder_brains.manifest_utils import (
+    get_cost_ceilings,
+    get_module_params,
+    get_thresholds,
+    load_manifest,
+)
+
 logger = logging.getLogger('builder_brains.parameter_tuner')
-_MANIFEST_PATH = os.path.join(os.path.dirname(__file__), 'build_manifest.json')
-
-def _load_manifest() -> Dict[str, Any]:
-    try:
-        with open(_MANIFEST_PATH, 'r', encoding='utf-8') as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning('Failed to load build_manifest.json: %s — using defaults', exc)
-        return {}
-
-def _get_tuner_params(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('hyperparameter_weights', {}).get('parameter_tuner', {})
-
-def _get_thresholds(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('thresholds', {})
-
-def _get_cost_ceilings(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('execution_cost_ceilings', {})
 OBJECTIVE_NAMES: Tuple[str, str, str] = ('accuracy_score', 'inverse_wall_seconds', 'compression_ratio')
 NUM_OBJECTIVES: int = len(OBJECTIVE_NAMES)
 _INVERSE_WALL_CAP: float = 1000000000.0
@@ -975,10 +964,10 @@ def evaluate(metadata: Dict[str, Any], hyper_params: Dict[str, Any]) -> Dict[str
     """
     start_time: float = time.monotonic()
     logger.info('Parameter tuner pipeline started (multi-objective Pareto mode)')
-    manifest: Dict[str, Any] = _load_manifest()
-    params: Dict[str, Any] = {**_get_tuner_params(manifest), **hyper_params}
-    thresholds: Dict[str, Any] = _get_thresholds(manifest)
-    ceilings: Dict[str, Any] = _get_cost_ceilings(manifest)
+    manifest: Dict[str, Any] = load_manifest()
+    params: Dict[str, Any] = {**get_module_params(manifest, 'parameter_tuner'), **hyper_params}
+    thresholds: Dict[str, Any] = get_thresholds(manifest)
+    ceilings: Dict[str, Any] = get_cost_ceilings(manifest)
     wall_limit: float = ceilings.get('parameter_tuner_max_wall_seconds', 45.0)
     initial_lr: float = float(params.get('initial_learning_rate', 0.01))
     min_lr: float = float(params.get('min_learning_rate', 1e-05))

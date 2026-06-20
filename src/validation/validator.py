@@ -22,10 +22,13 @@ import json
 import os
 import re
 import shlex
-import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from src.utils.json_parsing import extract_json
+from src.utils.serialization import dataclass_to_dict
+from src.utils.subprocess_utils import run_command
 
 Runner = Callable[[List[str], Optional[str]], Tuple[int, str, str]]
 
@@ -38,7 +41,7 @@ class ValidationCaseResult:
     message: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {"name": self.name, "passed": self.passed, "error": self.error, "message": self.message}
+        return dataclass_to_dict(self)
 
 
 @dataclass
@@ -118,7 +121,7 @@ class Validator:
 
     def _parse(self, stdout: str, rc: int) -> ValidationReport:
         # 1) JSON form.
-        blob = self._extract_json(stdout)
+        blob = extract_json(stdout)
         if isinstance(blob, dict) and "cases" in blob:
             cases: List[ValidationCaseResult] = []
             for entry in blob.get("cases", []):
@@ -171,34 +174,5 @@ class Validator:
         return cases
 
     @staticmethod
-    def _extract_json(text: str) -> Optional[Any]:
-        text = text.strip()
-        try:
-            return json.loads(text)
-        except (ValueError, TypeError):
-            pass
-        start, end = text.find("{"), text.rfind("}")
-        if 0 <= start < end:
-            try:
-                return json.loads(text[start : end + 1])
-            except (ValueError, TypeError):
-                return None
-        return None
-
-    @staticmethod
     def _default_runner(cmd: List[str], workdir: Optional[str]) -> Tuple[int, str, str]:
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=workdir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            return 1, "", str(exc)
-        return (
-            proc.returncode,
-            proc.stdout.decode("utf-8", "replace"),
-            proc.stderr.decode("utf-8", "replace"),
-        )
+        return run_command(cmd, workdir)

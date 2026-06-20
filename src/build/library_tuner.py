@@ -21,6 +21,8 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from src.utils.serialization import dataclass_to_dict
+
 
 # Candidate gene values exposed to the evolutionary engine (feature #2).  Only
 # the values that are actually available on the host are offered as genes, so
@@ -45,18 +47,7 @@ class DetectedLibrary:
     detected_via: str = "none"
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "found": self.found,
-            "flavor": self.flavor,
-            "version": self.version,
-            "include_dirs": self.include_dirs,
-            "lib_dirs": self.lib_dirs,
-            "libs": self.libs,
-            "cflags": self.cflags,
-            "linker_flags": self.linker_flags,
-            "detected_via": self.detected_via,
-        }
+        return dataclass_to_dict(self)
 
 
 class LibraryTuner:

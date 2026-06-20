@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from src.utils.serialization import dataclass_to_dict
+
 
 # backend -> (compiler executable, object-file extension)
 _BACKEND_COMPILERS = {
@@ -43,15 +45,9 @@ class KernelCompileResult:
     duration: float = 0.0
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "source": self.source,
-            "output": self.output,
-            "backend": self.backend,
-            "status": self.status,
-            "command": self.command,
-            "returncode": self.returncode,
-            "duration": round(self.duration, 6),
-        }
+        return dataclass_to_dict(
+            self, exclude=["stderr"], round_keys={"duration": 6}
+        )
 
 
 class GPUPipeline:
