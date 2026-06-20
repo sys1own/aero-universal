@@ -7,3 +7,6 @@ __pycache__/
 
 # Build artifacts produced by the tool
 build_artifacts/
+
+# Ephemeral tool scratch space (hardware profiles, polymorph cache, etc.)
+.aero/

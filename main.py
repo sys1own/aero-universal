@@ -121,6 +121,12 @@ def build_command(args: argparse.Namespace) -> int:
         for asset in metadata.get("applied_assets", []):
             print(f"Updated asset: {asset}")
 
+    # Autonomous Hardware-Polymerization: probe the host and polymorphically
+    # rewrite the freshly generated sources for it, after code generation but
+    # before any linking/execution.  Runs transparently with no user flags.
+    if not getattr(args, "no_polymorph", False):
+        _maybe_run_polymorphization(workspace)
+
     # Self-evolution after the initial build (feature #5).
     if not getattr(args, "no_evolution", False):
         _maybe_run_evolution(workspace)
@@ -279,6 +285,47 @@ def _maybe_run_semantic_fluidity(workspace: Path) -> None:
         )
     except Exception as exc:  # noqa: BLE001 - ingestion must not abort the build
         print(f"[semantic-fluidity] ingestion skipped: {exc}")
+
+
+def _maybe_run_polymorphization(workspace: Path) -> None:
+    """Probe the host and polymorphically rewrite the generated sources for it.
+
+    Runs after code generation but before linking/execution.  Operates on the
+    generated artifacts directory and writes rewritten copies into an ephemeral
+    build cache (``.aero/polymorph_cache``), leaving the user's primary source
+    directory untouched.  On by default (no flags required); can be disabled via
+    ``--no-polymorph`` or ``blueprint_config.json``'s ``polymorphization`` section.
+    Never aborts the build on failure.
+    """
+    config = _workspace_json_config(workspace)
+    poly_cfg = config.get("polymorphization", {})
+    if poly_cfg.get("enabled") is False:
+        return
+    source_dir = workspace / poly_cfg.get("source_dir", "build_artifacts")
+    if not source_dir.exists():
+        return
+    from src.polymorphization import PolymorphizationEngine
+
+    cache_dir = workspace / poly_cfg.get("cache_dir", str(Path(".aero") / "polymorph_cache"))
+    print(f"\n[polymorph] inspecting host and rewriting {source_dir}...")
+    try:
+        engine = PolymorphizationEngine()
+        report = engine.polymerize_tree(source_dir, cache_dir)
+        engine.write_report(report, cache_dir)
+        topo = report["topology"]
+        derived = topo["derived"]
+        rewrite = report["rewrite"]
+        print(
+            f"[polymorph] host: {topo['arch']} {topo['physical_cores']}p/{topo['logical_cores']}l "
+            f"simd={derived['best_simd']} align={derived['alignment_bytes']}B "
+            f"gpus={len(topo['gpus'])}"
+        )
+        print(
+            f"[polymorph] rewrote {rewrite['files_rewritten']}/{rewrite['files_processed']} "
+            f"file(s) -> {cache_dir}"
+        )
+    except Exception as exc:  # noqa: BLE001 - polymorphization must not abort the build
+        print(f"[polymorph] skipped: {exc}")
 
 
 def _maybe_hardware_probe(workspace: Path) -> None:
@@ -766,6 +813,55 @@ def invariants_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def polymorphize_command(args: argparse.Namespace) -> int:
+    """Inspect the host and polymorphically rewrite generated code for it.
+
+    Probes CPU vector features, cache topology, core counts and GPUs, then
+    rewrites the C/C++/Rust/LLVM-IR files under --source-dir into an ephemeral
+    cache (alignment, vectorised micro-kernels, thread-pool sizing) without
+    touching the source directory.  With --profile-only it just prints the
+    discovered topology.
+    """
+    from src.polymorphization import PolymorphizationEngine
+
+    engine = PolymorphizationEngine()
+
+    if args.profile_only:
+        topology = engine.profile_host()
+        derived = topology.to_dict()["derived"]
+        print("\nHardware Topology:")
+        print(f"  arch             : {topology.arch}")
+        print(f"  cores            : {topology.physical_cores} physical / {topology.logical_cores} logical")
+        print(f"  cpu features     : {', '.join(topology.cpu_features) or '(none)'}")
+        print(f"  best simd        : {derived['best_simd']} ({derived['vector_width_bytes']}B vectors)")
+        print(f"  cache line       : {derived['cache_line_bytes']}B  -> alignment {derived['alignment_bytes']}B")
+        print(f"  cache levels     : {', '.join('L%d=%dKiB' % (c.level, c.size_bytes // 1024) for c in topology.cache_levels) or '(none)'}")
+        print(f"  gpus             : {', '.join('%s/%s' % (g.runtime, g.architecture) for g in topology.gpus) or '(none)'}")
+        print(f"  memory           : {topology.total_memory_bytes / 1024**3:.1f} GiB ({topology.memory_bandwidth_class} bandwidth)")
+        return 0
+
+    source_dir = Path(args.source_dir)
+    if not source_dir.exists():
+        print(f"{source_dir}: directory not found", file=sys.stderr)
+        return 1
+
+    cache_dir = Path(args.cache_dir)
+    report = engine.polymerize_tree(source_dir, cache_dir)
+    engine.write_report(report, cache_dir)
+
+    topo = report["topology"]
+    derived = topo["derived"]
+    rewrite = report["rewrite"]
+    print("\nAutonomous Hardware-Polymerization:")
+    print(f"  host             : {topo['arch']} {topo['physical_cores']}p/{topo['logical_cores']}l")
+    print(f"  best simd        : {derived['best_simd']} (align {derived['alignment_bytes']}B, {derived['vector_width_bytes']}B vectors)")
+    print(f"  gpus             : {len(topo['gpus'])}")
+    print(f"  files processed  : {rewrite['files_processed']}")
+    print(f"  files rewritten  : {rewrite['files_rewritten']}")
+    print(f"  cache (ephemeral): {cache_dir}")
+    return 0
+
+
 def runtime_command(args: argparse.Namespace) -> int:
     """Run the runtime benchmark and print collected metrics."""
     from src.runtime.feedback import RuntimeFeedback
@@ -807,6 +903,7 @@ def create_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("--no-hpc", action="store_true", help="Force a local build, ignoring [hpc] settings")
     build_parser.add_argument("--no-evolution", action="store_true", help="Skip the self-evolution pass after building")
     build_parser.add_argument("--no-hardware-probe", action="store_true", help="Skip hardware profiling at build start")
+    build_parser.add_argument("--no-polymorph", action="store_true", help="Skip autonomous hardware-polymerization of generated code")
     build_parser.add_argument("--runtime-feedback", action="store_true", help="Run the runtime benchmark after building")
     build_parser.add_argument("--validation-only", action="store_true", help="Skip the build; only run the validation suite")
     build_parser.set_defaults(handler=build_command)
@@ -891,6 +988,17 @@ def create_parser() -> argparse.ArgumentParser:
     invariants_parser.add_argument("--workspace", default=".", help="Workspace root (used to resolve the default report path)")
     invariants_parser.add_argument("--output", default=None, help="Explicit path for the invariant_schema_report.json")
     invariants_parser.set_defaults(handler=invariants_command)
+
+    # --- polymorphize (autonomous hardware-polymerization) ---
+    poly_parser = subparsers.add_parser(
+        "polymorphize", help="Inspect the host and polymorphically rewrite generated code for it"
+    )
+    poly_parser.add_argument("--source-dir", default="build_artifacts", help="Directory of generated code to rewrite")
+    poly_parser.add_argument(
+        "--cache-dir", default=str(Path(".aero") / "polymorph_cache"), help="Ephemeral output cache directory"
+    )
+    poly_parser.add_argument("--profile-only", action="store_true", help="Only print the host topology; do not rewrite")
+    poly_parser.set_defaults(handler=polymorphize_command)
 
     # --- hpc ---
     hpc_parser = subparsers.add_parser("hpc", help="Generate or submit an HPC build job")
