@@ -686,6 +686,22 @@ def create_fallback_context(manifest: Dict[str, Any], error_msg: str) -> Dict[st
     return build_context
 
 
+def _looks_like_lean(content: str) -> bool:
+    """Detect the ultra-lean Invisible Configuration dialect (lazy import)."""
+    from src.invisible_config.lean_parser import looks_like_lean_blueprint
+
+    return looks_like_lean_blueprint(content)
+
+
+def _parse_lean_blueprint(content: str, project_root: str) -> Dict[str, Any]:
+    """Infer a full build_context from a lean blueprint (lazy import)."""
+    from pathlib import Path
+
+    from src.invisible_config.engine import InvisibleConfigEngine
+
+    return InvisibleConfigEngine(Path(project_root)).build_context_from_source(content)
+
+
 def parse_dsl_blueprint(content: str, filename: str = "blueprint.aero") -> Dict[str, Any]:
     """Parse a block-DSL ``blueprint.aero`` and return a normalized ``build_context``.
 
@@ -738,6 +754,17 @@ def parse_blueprint(blueprint_path: str, manifest_path: str = _MANIFEST_PATH) ->
 
     with open(blueprint_path, "r", encoding="utf-8") as fh:
         content = fh.read()
+
+    # The ultra-lean "Invisible Configuration Layer" dialect: a handful of lines
+    # of semantic intent from which the whole build graph is inferred by
+    # scanning the project directory.  Detected before JSON/INI so it routes to
+    # the DAG-inference engine instead of the legacy parsers.
+    if _looks_like_lean(content):
+        try:
+            return _parse_lean_blueprint(content, os.path.dirname(os.path.abspath(blueprint_path)))
+        except Exception as exc:  # noqa: BLE001 - fall back to stable manifest
+            logger.exception("Lean blueprint inference failed for %s", blueprint_path)
+            return create_fallback_context(stable_manifest, f"Lean blueprint inference failed: {exc}")
 
     # JSON blueprints take a dedicated, strict path: validation errors are
     # surfaced (raised) rather than silently falling back, so misconfigured
