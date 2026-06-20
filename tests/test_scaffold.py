@@ -150,6 +150,23 @@ class TestRustShield(unittest.TestCase):
         report = self.shield.apply("fn main() { let x = 1; }")
         self.assertFalse(report.changed)
 
+    def test_named_shim_rug_v1_30_patch(self):
+        src = "use rug::Float;\nfn f() {}\n"
+        report = self.shield.apply(src, compatibility_shims=["rug_v1_30_patch"])
+        self.assertIn("AeroNegMutExt", report.source)
+        self.assertTrue(any("extension-traits" in a for a in report.applied))
+
+    def test_named_shim_pyo3_usize_alignment(self):
+        src = "    let q_dim = match sec { 0 => 2, _ => 5 };\n"
+        report = self.shield.apply(src, compatibility_shims=["pyo3_usize_alignment"])
+        self.assertIn("let q_dim: usize = match", report.source)
+        self.assertTrue(report.applied)
+
+    def test_named_shims_empty_list_is_noop(self):
+        report = self.shield.apply(RUG_PYO3_SOURCE, compatibility_shims=[])
+        self.assertEqual(report.source, RUG_PYO3_SOURCE)
+        self.assertFalse(report.applied)
+
     def test_fix_mutability(self):
         diag = "error[E0596]: cannot borrow `acc` as mutable, as it is not declared as mutable"
         out, applied = self.shield.fix_mutability("    let acc = Float::new(53);\n", diag)
@@ -233,6 +250,7 @@ class TestRepoGenerator(_Tmp):
         self.assertIn("crate-type = [\"cdylib\"]", (root / "Cargo.toml").read_text())
         self.assertIn('features = ["extension-module"]', (root / "Cargo.toml").read_text())
         self.assertIn("/target/", (root / ".gitignore").read_text())
+        self.assertIn("build_artifacts/", (root / ".gitignore").read_text())
         self.assertIn("anyon_sim", (root / "test_binding.py").read_text())
         # generate_repo writes the spec's source verbatim (shielding is the
         # engine's job, exercised in TestEngine).

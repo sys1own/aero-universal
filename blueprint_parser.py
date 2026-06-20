@@ -34,6 +34,7 @@ _OPTIONAL_SECTIONS = (
     "frameworks",
     "validation",
     "context",
+    "scaffold",
 )
 
 _ALLOWED_BLAS = {"auto", "mkl", "openblas", "none"}
@@ -105,6 +106,14 @@ def _default_optional_sections() -> Dict[str, Dict[str, Any]]:
             "validation_required": True,
         },
         "context": {"sources": []},
+        "scaffold": {
+            "source_entry": "",
+            "auto_layout": False,
+            "distribution_directory": "",
+            "compatibility_shims": [],
+            "name": "",
+            "dependencies": {},
+        },
     }
 
 
@@ -528,6 +537,25 @@ def normalize_optional_sections(sections: Dict[str, Dict[str, Any]]) -> Dict[str
             normalized["context"] = merged
         else:
             raise BlueprintParseError("[context] must be a JSON object or list")
+
+    # --- [scaffold] --------------------------------------------------
+    scaffold = sections.get("scaffold")
+    if isinstance(scaffold, dict):
+        target = normalized["scaffold"]
+        if "source_entry" in scaffold:
+            target["source_entry"] = str(scaffold["source_entry"]).strip()
+        if "auto_layout" in scaffold:
+            target["auto_layout"] = _as_bool("scaffold", "auto_layout", scaffold["auto_layout"])
+        if "distribution_directory" in scaffold:
+            target["distribution_directory"] = str(scaffold["distribution_directory"]).strip()
+        if "name" in scaffold:
+            target["name"] = str(scaffold["name"]).strip()
+        if "compatibility_shims" in scaffold:
+            target["compatibility_shims"] = _as_str_list(
+                "scaffold", "compatibility_shims", scaffold["compatibility_shims"]
+            )
+        if "dependencies" in scaffold:
+            target["dependencies"] = _as_dict("scaffold", "dependencies", scaffold["dependencies"])
 
     return normalized
 

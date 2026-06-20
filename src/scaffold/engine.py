@@ -82,6 +82,7 @@ class ScaffoldEngine:
         base_dir: Optional[Path] = None,
         distribution_directory: Optional[Path] = None,
         dependencies: Optional[Dict[str, Any]] = None,
+        compatibility_shims: Optional[List[str]] = None,
         build: bool = False,
         keep: Optional[bool] = None,
     ) -> ScaffoldResult:
@@ -91,7 +92,7 @@ class ScaffoldEngine:
         source_text = entry.read_text()
 
         # 2. Shield rug/pyo3 sources (no-op for anything else).
-        shield_report = self._shield(entry, source_text)
+        shield_report = self._shield(entry, source_text, compatibility_shims=compatibility_shims)
 
         # 3. Out-of-tree workspace (temp dir, or the distribution directory).
         workspace = OutOfTreeWorkspace(distribution_directory=distribution_directory, keep=keep)
@@ -130,10 +131,15 @@ class ScaffoldEngine:
 
     # ------------------------------------------------------------------
 
-    def _shield(self, entry: SourceEntry, source_text: str) -> ShieldReport:
+    def _shield(
+        self,
+        entry: SourceEntry,
+        source_text: str,
+        compatibility_shims: Optional[List[str]] = None,
+    ) -> ShieldReport:
         if entry.language != "rust":
             return ShieldReport(source=source_text)
-        report = self.shield.apply(source_text)
+        report = self.shield.apply(source_text, compatibility_shims=compatibility_shims)
         if report.anchors:
             self._log(f"shield: detected anchors {sorted(report.anchors)}")
         for fix in report.applied:

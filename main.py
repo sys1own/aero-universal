@@ -1,32 +1,5 @@
 from __future__ import annotations
 
-import sys
-import os
-import re
-
-# Aero Universal Entry-Gate Interception Hook
-if len(sys.argv) > 1 and sys.argv[1] == "build":
-    print("\n[Aero Gate] 'build' command intercepted successfully. Activating universal compiler driver...")
-    try:
-        from src.compiler_driver import run_universal_compiler
-        target_name = "anyon_simulator"
-        
-        # Pull target metadata from blueprint
-        if os.path.exists("blueprint.aero"):
-            with open("blueprint.aero", "r") as bf:
-                b_content = bf.read()
-                matches = re.findall(r'targets\s*=\s*\["(.*?)"\]', b_content)
-                if matches:
-                    target_name = matches[0]
-                    
-        recipe_dict = {"parallelism": 2, "unroll": 4, "vectorization": "avx2"}
-        success = run_universal_compiler("/content/aero-universal", target_name, recipe_dict)
-        sys.exit(0 if success else 1)
-    except Exception as gate_err:
-        print(f"[Aero Gate Error] Failed to route to compiler driver: {str(gate_err)}")
-        sys.exit(1)
-
-
 import argparse
 import json
 import logging
@@ -54,7 +27,7 @@ def _load_blueprint_config(path: Optional[str] = None) -> dict:
 # ------------------------------------------------------------------
 
 
-def _strict_blueprint_gate(workspace: Path) -> Optional[int]:
+def _strict_blueprint_gate(blueprint_path: Path) -> Optional[int]:
     """Strictly validate a block-format ``blueprint.aero`` before any build step.
 
     Returns an exit code to abort with, or ``None`` to proceed.  This is a no-op
@@ -65,7 +38,7 @@ def _strict_blueprint_gate(workspace: Path) -> Optional[int]:
     """
     import blueprint_lang
 
-    bp_path = workspace / "blueprint.aero"
+    bp_path = blueprint_path
     if not bp_path.exists():
         return None
     try:
@@ -94,18 +67,51 @@ def build_command(args: argparse.Namespace) -> int:
     ui = AeroUI()
     orchestrator.configure_logging(verbose=args.verbose)
     workspace = Path(args.workspace).resolve()
-    bp_path = workspace / "blueprint.aero"
+    bp_path = Path(args.blueprint).resolve() if getattr(args, "blueprint", None) else workspace / "blueprint.aero"
 
     # Phase 1: Parsing
     ui.parsing(str(bp_path))
 
     # Strict syntax/validation gate -- runs BEFORE any build step so a broken
     # block-format blueprint aborts immediately with a clear diagnostic.
-    gate = _strict_blueprint_gate(workspace)
+    gate = _strict_blueprint_gate(bp_path)
     if gate is not None:
         return gate
 
     context = blueprint_parser.parse_blueprint(str(bp_path))
+
+    # Isolated scaffold build: when [scaffold] declares auto_layout and/or
+    # source_entry, route through the out-of-tree pipeline and keep the tool
+    # directory pristine.
+    from src.scaffold.pipeline import ScaffoldBuildPipeline, should_run_scaffold_pipeline
+    from src.scaffold.source_resolver import SourceEntryNotFound
+    from src.scaffold.workspace import WorkspaceLocationError
+
+    if should_run_scaffold_pipeline(context) and not getattr(args, "validation_only", False):
+        ui.tag("Scaffold", "out-of-tree isolated build from blueprint [scaffold]")
+        blueprint_dir = bp_path.parent
+        pipeline = ScaffoldBuildPipeline(verbose=args.verbose or True)
+        try:
+            result = pipeline.run(
+                context,
+                blueprint_dir=blueprint_dir,
+                build=not getattr(args, "no_scaffold_build", False),
+            )
+        except (SourceEntryNotFound, WorkspaceLocationError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        repo = result.scaffold.repo
+        print("\nIsolated scaffold build complete:")
+        print(f"  workspace        : {result.scaffold.workspace}  (out-of-tree)")
+        print(f"  crate            : {repo['spec']['name']}  v{repo['spec']['version']}")
+        print(f"  files written    : {', '.join(repo['files'])}")
+        if result.scaffold.shield.get("applied"):
+            print(f"  shields applied  : {', '.join(result.scaffold.shield['applied'])}")
+        if result.scaffold.build is not None:
+            status = "succeeded" if result.scaffold.build["succeeded"] else "failed"
+            print(f"  build            : {status}")
+        ui.success()
+        return 0 if result.succeeded else 1
 
     # Phase 2: Validating
     targets = context.get("compilation_targets", [])
@@ -1113,6 +1119,11 @@ def create_parser() -> argparse.ArgumentParser:
     # --- build (original) ---
     build_parser = subparsers.add_parser("build", help="Run the full builder pipeline")
     build_parser.add_argument("--workspace", default=".", help="Workspace root to build")
+    build_parser.add_argument(
+        "--blueprint",
+        default=None,
+        help="Path to blueprint.aero (default: <workspace>/blueprint.aero)",
+    )
     build_parser.add_argument("--cycles", type=int, default=3, help="Number of orchestration cycles")
     build_parser.add_argument(
         "--telemetry-interval",
@@ -1132,6 +1143,11 @@ def create_parser() -> argparse.ArgumentParser:
     build_parser.add_argument("--no-polymorph", action="store_true", help="Skip autonomous hardware-polymerization of generated code")
     build_parser.add_argument("--runtime-feedback", action="store_true", help="Run the runtime benchmark after building")
     build_parser.add_argument("--validation-only", action="store_true", help="Skip the build; only run the validation suite")
+    build_parser.add_argument(
+        "--no-scaffold-build",
+        action="store_true",
+        help="When [scaffold] is active, synthesize the repo but skip cargo build",
+    )
     build_parser.set_defaults(handler=build_command)
 
     # --- plan (discover, validate, build DAG, print visual tree) ---

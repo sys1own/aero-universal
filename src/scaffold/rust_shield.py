@@ -24,10 +24,16 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import List, Set, Tuple
+from typing import List, Optional, Set, Tuple
 
 # Crate anchors that trigger Rust shielding.
 RUST_ANCHORS = ("rug", "pyo3")
+
+# Named compatibility shims referenced from blueprint [scaffold] configuration.
+COMPATIBILITY_SHIMS = {
+    "rug_v1_30_patch": "extension-traits(neg_mut,nth_root)",
+    "pyo3_usize_alignment": "type-cascade-alignment(usize)",
+}
 
 # A sentinel so trait injection is idempotent across repeated passes.
 _TRAIT_SENTINEL = "AeroNegMutExt"
@@ -98,10 +104,37 @@ class RustSemanticShield:
     # Pre-emptive shields (applied during the parsing/scaffold phase)
     # ------------------------------------------------------------------
 
-    def apply(self, source: str) -> ShieldReport:
-        """Apply every pre-emptive shield, idempotently."""
+    def apply(
+        self,
+        source: str,
+        compatibility_shims: Optional[List[str]] = None,
+    ) -> ShieldReport:
+        """Apply pre-emptive shields, idempotently.
+
+        When ``compatibility_shims`` is provided (from a blueprint ``[scaffold]``
+        section), only the named shims are applied.  Otherwise the legacy
+        auto-detection path applies all relevant fixes when ``rug`` / ``pyo3``
+        anchors are present.
+        """
         anchors = self.detect_anchors(source)
         report = ShieldReport(source=source, anchors=anchors)
+
+        if compatibility_shims is not None:
+            if not compatibility_shims:
+                return report
+            if "rug_v1_30_patch" in compatibility_shims:
+                source, injected = self.inject_extension_traits(source)
+                if injected:
+                    report.applied.append(COMPATIBILITY_SHIMS["rug_v1_30_patch"])
+            if "pyo3_usize_alignment" in compatibility_shims:
+                source, aligned = self.align_match_types(source)
+                if aligned:
+                    report.applied.append(
+                        f"{COMPATIBILITY_SHIMS['pyo3_usize_alignment']} x{aligned}"
+                    )
+            report.source = source
+            return report
+
         if not anchors:
             return report
 

@@ -130,6 +130,7 @@ def render_gitignore() -> str:
     return (
         "# Rust build output\n"
         "/target/\n"
+        "build_artifacts/\n"
         "**/*.rs.bk\n"
         "Cargo.lock\n\n"
         "# Compiled Python extension artefacts\n"

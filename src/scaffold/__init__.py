@@ -17,6 +17,12 @@ Typical use::
 """
 
 from src.scaffold.engine import ScaffoldEngine, ScaffoldResult
+from src.scaffold.pipeline import (
+    PipelineResult,
+    ScaffoldBuildPipeline,
+    scaffold_config_from_context,
+    should_run_scaffold_pipeline,
+)
 from src.scaffold.recovery import DiagnosticRecoveryRunner, RecoveryResult
 from src.scaffold.repo_generator import (
     GeneratedRepo,
@@ -25,7 +31,7 @@ from src.scaffold.repo_generator import (
     generate_repo,
     infer_dependencies,
 )
-from src.scaffold.rust_shield import EXTENSION_TRAITS, RUST_ANCHORS, RustSemanticShield, ShieldReport
+from src.scaffold.rust_shield import COMPATIBILITY_SHIMS, EXTENSION_TRAITS, RUST_ANCHORS, RustSemanticShield, ShieldReport
 from src.scaffold.source_resolver import (
     SourceEntry,
     SourceEntryNotFound,
@@ -36,8 +42,13 @@ from src.scaffold.workspace import OutOfTreeWorkspace, WorkspaceLocationError
 __all__ = [
     "ScaffoldEngine",
     "ScaffoldResult",
+    "ScaffoldBuildPipeline",
+    "PipelineResult",
+    "scaffold_config_from_context",
+    "should_run_scaffold_pipeline",
     "RustSemanticShield",
     "ShieldReport",
+    "COMPATIBILITY_SHIMS",
     "EXTENSION_TRAITS",
     "RUST_ANCHORS",
     "OutOfTreeWorkspace",
