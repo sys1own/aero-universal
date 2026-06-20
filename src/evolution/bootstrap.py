@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import concurrent.futures
 import json
+import logging
 import random
 import re
 import shutil
@@ -18,6 +19,8 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+logger = logging.getLogger("evolution.bootstrap")
 
 import numpy as np
 
@@ -190,8 +193,8 @@ class SelfEvolutionEngine:
             try:
                 metrics = self.runtime_evaluator(genome)
                 fitness = self.runtime_feedback.blend_into_fitness(fitness, metrics)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Runtime evaluator failed for genome, skipping feedback blending: %s", exc)
 
         return fitness
 

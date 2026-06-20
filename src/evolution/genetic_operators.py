@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import copy
+import logging
 import random
 from typing import Any, Dict, List
 
 import numpy as np
+
+logger = logging.getLogger("evolution.genetic_operators")
 
 
 class MutationEngine:
@@ -66,7 +69,10 @@ class MutationEngine:
             from src.build.framework_integration import FrameworkIntegration
 
             space = FrameworkIntegration(config).genome_space()
-        except Exception:
+        except ImportError:
+            return
+        except Exception as exc:
+            logger.warning("Failed to load framework genome space: %s", exc)
             return
         for key, values in space.items():
             self.mutation_vectors[key] = list(values)

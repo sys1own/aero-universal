@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 from typing import Optional, Sequence
 
 import orchestrator
+
+logger = logging.getLogger("aero.main")
 
 _BLUEPRINT_CONFIG = Path(__file__).resolve().parent / "blueprint_config.json"
 
@@ -40,7 +43,8 @@ def _strict_blueprint_gate(workspace: Path) -> Optional[int]:
         return None
     try:
         source = bp_path.read_text(encoding="utf-8")
-    except OSError:
+    except OSError as exc:
+        logger.warning("Cannot read blueprint file %s: %s", bp_path, exc)
         return None
     if not blueprint_lang.looks_like_blueprint_dsl(source):
         return None
@@ -116,7 +120,11 @@ def _workspace_json_config(workspace: Path) -> dict:
         return {}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except OSError as exc:
+        logger.debug("Cannot read workspace config %s: %s", path, exc)
+        return {}
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid JSON in workspace config %s: %s", path, exc)
         return {}
 
 

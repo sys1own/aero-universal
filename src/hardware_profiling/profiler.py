@@ -9,6 +9,7 @@ which adjusts loop unrolling, cache blocking, and vectorisation hints.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 import struct
@@ -18,6 +19,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
+
+logger = logging.getLogger("hardware_profiling.profiler")
 
 
 @dataclass
@@ -205,7 +208,11 @@ class HardwareProfiler:
                 "linker_flags": tuner.linker_flags(detected),
                 "compiler_flags": tuner.compiler_flags(detected),
             }
-        except Exception:
+        except ImportError:
+            logger.debug("LibraryTuner not available, skipping library detection")
+            profile.libraries = {}
+        except Exception as exc:
+            logger.warning("Library detection failed: %s", exc)
             profile.libraries = {}
 
     def save_profile(self, profile: HardwareProfile) -> Path:
@@ -279,8 +286,10 @@ class HardwareProfiler:
                     if "cpu MHz" in line:
                         profile.cpu_frequency_mhz = float(line.split(":")[1].strip())
                         return
-        except Exception:
+        except OSError:
             pass
+        except (ValueError, IndexError) as exc:
+            logger.debug("Failed to parse CPU frequency from /proc/cpuinfo: %s", exc)
 
     @staticmethod
     def _probe_memory(profile: HardwareProfile) -> None:
@@ -291,8 +300,10 @@ class HardwareProfiler:
                         kb = int(line.split()[1])
                         profile.total_memory_bytes = kb * 1024
                         return
-        except Exception:
+        except OSError:
             pass
+        except (ValueError, IndexError) as exc:
+            logger.debug("Failed to parse memory info from /proc/meminfo: %s", exc)
 
     def _probe_cache_hierarchy(self, profile: HardwareProfile) -> None:
         cfg = self.benchmarks.get("cache_hierarchy", {})
@@ -330,8 +341,10 @@ class HardwareProfiler:
                     if line.startswith("flags"):
                         cpuinfo_flags = set(line.split(":")[1].lower().split())
                         break
-        except Exception:
+        except OSError:
             pass
+        except (ValueError, IndexError) as exc:
+            logger.debug("Failed to parse SIMD flags from /proc/cpuinfo: %s", exc)
 
         for isa in test_vectors:
             available = isa.lower().replace(".", "_").replace("-", "_") in " ".join(cpuinfo_flags) or isa.lower() in " ".join(cpuinfo_flags)

@@ -12,10 +12,13 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
+
+logger = logging.getLogger("precision_shield.shield")
 
 from z3 import (
     Bool,
@@ -222,7 +225,8 @@ class PrecisionShield:
         violations: List[str] = []
         try:
             source = file_path.read_text(encoding="utf-8")
-        except Exception:
+        except OSError as exc:
+            logger.warning("Cannot read Rust file %s for validation: %s", file_path, exc)
             return violations
 
         lines = source.splitlines()
@@ -276,7 +280,8 @@ class PrecisionShield:
             solver.set("timeout", self.smt_timeout_ms)
             solver.add(za != zb)
             return solver.check() == unsat
-        except Exception:
+        except Exception as exc:
+            logger.warning("Z3 solver failed for equivalence check: %s", exc)
             return self.fallback != "conservative" and False
 
     def _expr_to_z3(self, node: ast.AST, env: Dict[str, Any]) -> Any:

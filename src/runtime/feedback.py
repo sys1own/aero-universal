@@ -13,6 +13,7 @@ returns an empty, unsuccessful :class:`RuntimeMetrics`.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -26,6 +27,7 @@ from typing import Any, Dict, List, Optional
 from src.utils.json_parsing import extract_json
 from src.utils.serialization import dataclass_to_dict
 
+logger = logging.getLogger("runtime.feedback")
 
 @dataclass
 class RuntimeMetrics:
@@ -242,17 +244,23 @@ class RuntimeFeedback:
                 try:
                     cct = child.cpu_times()
                     total += cct.user + cct.system
-                except Exception:
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
             return total
-        except Exception:
-            try:
-                import resource
+        except ImportError:
+            pass
+        except Exception as exc:
+            logger.debug("psutil CPU time collection failed: %s", exc)
+        try:
+            import resource
 
-                usage = resource.getrusage(resource.RUSAGE_CHILDREN)
-                return usage.ru_utime + usage.ru_stime
-            except Exception:
-                return 0.0
+            usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+            return usage.ru_utime + usage.ru_stime
+        except ImportError:
+            return 0.0
+        except Exception as exc:
+            logger.debug("resource CPU time collection failed: %s", exc)
+            return 0.0
 
     @staticmethod
     def _peak_rss_mb() -> float:
@@ -262,5 +270,8 @@ class RuntimeFeedback:
             maxrss = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
             # Linux reports KB, macOS reports bytes.
             return maxrss / 1024.0 if maxrss > 1_000_000 else maxrss / 1024.0
-        except Exception:
+        except ImportError:
+            return 0.0
+        except Exception as exc:
+            logger.debug("Failed to read peak RSS: %s", exc)
             return 0.0

@@ -23,11 +23,14 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import networkx as nx
+
+logger = logging.getLogger("analysis.semantic_mapper")
 
 
 class UnifiedASTNode:
@@ -104,7 +107,7 @@ class SemanticMapper:
         parsers: Dict[str, Any] = {}
         try:
             from tree_sitter import Language, Parser
-        except Exception:
+        except ImportError:
             return parsers
 
         grammar_modules = {
@@ -119,7 +122,8 @@ class SemanticMapper:
             try:
                 grammar = importlib.import_module(module_name)
                 parsers[lang] = Parser(Language(grammar.language()))
-            except Exception:
+            except (ImportError, Exception) as exc:
+                logger.debug("tree-sitter grammar %r unavailable: %s", lang, exc)
                 continue
         return parsers
 
@@ -130,7 +134,7 @@ class SemanticMapper:
             from tree_sitter import Language, Parser
 
             return Parser(Language(tree_sitter_rust.language()))
-        except Exception:
+        except ImportError:
             return None
 
     # ------------------------------------------------------------------
@@ -258,7 +262,8 @@ class SemanticMapper:
         try:
             source = file_path.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(file_path))
-        except Exception:
+        except (OSError, SyntaxError) as exc:
+            logger.debug("Skipping Python file %s: %s", file_path, exc)
             return
 
         # Pre-compute which assignment statements are module-level so they can be
@@ -277,8 +282,8 @@ class SemanticMapper:
             src_snippet = None
             try:
                 src_snippet = ast.unparse(node)
-            except Exception:
-                pass
+            except (ValueError, TypeError) as exc:
+                logger.debug("ast.unparse failed for %s node in %s: %s", node_type, file_path, exc)
 
             uast_node = UnifiedASTNode(
                 node_id=node_id,
@@ -347,8 +352,10 @@ class SemanticMapper:
             source = file_path.read_text(encoding="utf-8")
             tree = self.rust_parser.parse(source.encode("utf-8"))
             self._walk_rust_tree(tree.root_node, file_path, source)
-        except Exception:
-            return
+        except OSError as exc:
+            logger.debug("Cannot read Rust file %s: %s", file_path, exc)
+        except Exception as exc:
+            logger.warning("Failed to parse Rust file %s: %s", file_path, exc)
 
     def _walk_rust_tree(self, node: Any, file_path: Path, source: str) -> None:
         node_id = self._generate_rust_node_id(file_path, node)
@@ -397,8 +404,10 @@ class SemanticMapper:
             source = file_path.read_text(encoding="utf-8")
             tree = parser.parse(source.encode("utf-8"))
             self._walk_ts_tree(tree.root_node, file_path, source, language)
-        except Exception:
-            return
+        except OSError as exc:
+            logger.debug("Cannot read %s file %s: %s", language, file_path, exc)
+        except Exception as exc:
+            logger.warning("Failed to parse %s file %s: %s", language, file_path, exc)
 
     def _walk_ts_tree(self, node: Any, file_path: Path, source: str, language: str) -> None:
         node_id = self._generate_rust_node_id(file_path, node)
@@ -535,7 +544,8 @@ class SemanticMapper:
         """
         try:
             source = file_path.read_text(encoding="utf-8")
-        except Exception:
+        except OSError as exc:
+            logger.debug("Cannot read GPU kernel file %s: %s", file_path, exc)
             return
 
         file_node_id = hashlib.md5(f"{file_path}:gpu_translation_unit".encode()).hexdigest()[:16]
