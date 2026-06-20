@@ -97,7 +97,7 @@ def _default_optional_sections() -> Dict[str, Dict[str, Any]]:
             "accuracy_reference": "",
             "feedback_weight": 0.3,
         },
-        "frameworks": {},
+        "frameworks": {"language": ""},
         "validation": {
             "suite": "",
             "tolerance": 1e-8,
@@ -500,8 +500,16 @@ def normalize_optional_sections(sections: Dict[str, Dict[str, Any]]) -> Dict[str
     # --- [frameworks] ------------------------------------------------
     frameworks = sections.get("frameworks")
     if isinstance(frameworks, dict):
-        framework_map: Dict[str, Any] = {}
+        target = normalized["frameworks"]
+        if "language" in frameworks:
+            lang = str(frameworks["language"]).strip().lower()
+            if lang and lang not in ("rust", "python"):
+                raise BlueprintParseError("[frameworks] language must be 'rust' or 'python'")
+            target["language"] = lang
+        framework_map: Dict[str, Any] = dict(target)
         for name, spec in frameworks.items():
+            if name == "language":
+                continue
             if not isinstance(spec, dict):
                 raise BlueprintParseError(f"[frameworks] '{name}' must be a JSON object")
             framework_map[str(name)] = dict(spec)

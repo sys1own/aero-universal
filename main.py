@@ -101,15 +101,24 @@ def build_command(args: argparse.Namespace) -> int:
             print(f"error: {exc}", file=sys.stderr)
             return 1
         repo = result.scaffold.repo
+        spec = repo.get("spec") or {}
         print("\nIsolated scaffold build complete:")
+        print(f"  language         : {result.language}")
         print(f"  workspace        : {result.scaffold.workspace}  (out-of-tree)")
-        print(f"  crate            : {repo['spec']['name']}  v{repo['spec']['version']}")
-        print(f"  files written    : {', '.join(repo['files'])}")
+        if result.language == "python":
+            print(f"  project          : {spec.get('name', '?')}")
+            print(f"  entry script     : {spec.get('entry_filename', '?')}")
+        else:
+            print(f"  crate            : {spec.get('name', '?')}  v{spec.get('version', '?')}")
+        print(f"  files written    : {', '.join(repo.get('files', []))}")
         if result.scaffold.shield.get("applied"):
             print(f"  shields applied  : {', '.join(result.scaffold.shield['applied'])}")
+        elif result.language == "python":
+            print("  shields applied  : (skipped — Python target)")
         if result.scaffold.build is not None:
+            label = "validation" if result.language == "python" else "build"
             status = "succeeded" if result.scaffold.build["succeeded"] else "failed"
-            print(f"  build            : {status}")
+            print(f"  {label:16} : {status}")
         ui.success()
         return 0 if result.succeeded else 1
 

@@ -24,6 +24,7 @@ def run_universal_compiler(
     source_entry: Optional[str] = None,
     distribution_directory: Optional[str] = None,
     compatibility_shims: Optional[list] = None,
+    language: Optional[str] = None,
 ) -> bool:
     """Run an isolated scaffold build for a Rust/pyo3 target.
 
@@ -57,6 +58,7 @@ def run_universal_compiler(
     )
 
     context: Dict[str, Any] = {
+        "frameworks": {"language": language or "rust"},
         "scaffold": {
             "source_entry": resolved_source,
             "auto_layout": True,

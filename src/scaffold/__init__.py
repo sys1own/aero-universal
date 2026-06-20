@@ -17,6 +17,7 @@ Typical use::
 """
 
 from src.scaffold.engine import ScaffoldEngine, ScaffoldResult
+from src.scaffold.language_router import resolve_target_language
 from src.scaffold.pipeline import (
     PipelineResult,
     ScaffoldBuildPipeline,
@@ -46,6 +47,7 @@ __all__ = [
     "PipelineResult",
     "scaffold_config_from_context",
     "should_run_scaffold_pipeline",
+    "resolve_target_language",
     "RustSemanticShield",
     "ShieldReport",
     "COMPATIBILITY_SHIMS",

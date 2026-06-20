@@ -92,6 +92,7 @@ class TestScaffoldBuildPipeline(unittest.TestCase):
         dist = self.tmp / "anyon_simulator_repository"
 
         context = {
+            "frameworks": {"language": "rust"},
             "scaffold": {
                 "source_entry": str(src),
                 "auto_layout": True,
@@ -141,6 +142,8 @@ dependencies = {{"core": []}}
 optimization_level = "O3"
 [cortex]
 target_accuracy_floor = 0.99
+[frameworks]
+language = "rust"
 [scaffold]
 {scaffold_section}
 """,
