@@ -216,12 +216,23 @@ def render_manifest(
     edition: str = DEFAULT_EDITION,
     version: str = DEFAULT_VERSION,
     crate_type: Optional[Sequence[str]] = None,
+    header: Optional[str] = None,
 ) -> str:
-    """Render a minimal, valid ``Cargo.toml`` as text."""
+    """Render a minimal, valid ``Cargo.toml`` as text.
+
+    ``header`` overrides the default "synthesised, commit your own" comment --
+    standalone-repo generators pass a header appropriate to a committed manifest.
+    """
     dependencies = dependencies or {}
+    if header is None:
+        header_lines = [
+            "# Synthesised by Aero Universal. Commit a Cargo.toml to take full control;",
+            "# Aero will then use it verbatim and never overwrite it.",
+        ]
+    else:
+        header_lines = [line if line.startswith("#") or not line else f"# {line}" for line in header.splitlines()]
     lines = [
-        "# Synthesised by Aero Universal. Commit a Cargo.toml to take full control;",
-        "# Aero will then use it verbatim and never overwrite it.",
+        *header_lines,
         "[package]",
         f'name = "{crate_name}"',
         f'version = "{version}"',

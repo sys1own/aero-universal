@@ -126,6 +126,22 @@ class ContextIngestor:
             result["error"] = f"context source not found: {source_root}"
             return result
 
+        # A source entry may be a single file living anywhere on the filesystem
+        # (e.g. /content/lib.rs, ../data/core.rs) -- read it from that exact
+        # location and copy it into the workspace without requiring a directory
+        # layout or any file relocation.
+        if source_root.is_file():
+            dest = self._single_file_destination(source_root, target_mapping)
+            ingested = self._ingest_file(
+                source_root, source_root.parent, dest.parent, language, repair_rules, mode,
+                dest_override=dest,
+            )
+            result["files"].append(ingested.to_dict())
+            result["files_ingested"] += 1
+            if ingested.repairs:
+                result["files_repaired"] += 1
+            return result
+
         target_root = self.workspace / target_mapping
         include = spec.get("include") or _LANG_GLOBS.get(language, ["**/*"])
         exclude = spec.get("exclude") or []
@@ -138,6 +154,17 @@ class ContextIngestor:
                 result["files_repaired"] += 1
         return result
 
+    def _single_file_destination(self, source_file: Path, target_mapping: str) -> Path:
+        """Resolve where a single-file source should land in the workspace.
+
+        ``target_mapping`` may name a file (has a suffix) or a directory; either
+        way the result is the concrete destination *file* path.
+        """
+        mapping = Path(target_mapping)
+        if mapping.suffix:  # e.g. "src/lib.rs" -> a file destination
+            return self.workspace / mapping
+        return self.workspace / mapping / source_file.name
+
     def _ingest_file(
         self,
         file_path: Path,
@@ -146,9 +173,9 @@ class ContextIngestor:
         language: str,
         repair_rules: List[str],
         mode: str,
+        dest_override: Optional[Path] = None,
     ) -> IngestedFile:
-        rel = file_path.relative_to(source_root)
-        dest = target_root / rel
+        dest = dest_override if dest_override is not None else target_root / file_path.relative_to(source_root)
         record = IngestedFile(
             source=str(file_path), destination=str(dest), language=language, mode=mode
         )

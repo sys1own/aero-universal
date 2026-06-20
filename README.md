@@ -491,6 +491,80 @@ Aero Build Failure
       version, e.g. cargo_dependencies = ["rug=<version>"], then rebuild.
 ```
 
+## Standalone Repository Generator
+
+`aero scaffold` turns a **single source file living anywhere on disk** into a
+complete, turn‑key, idiomatic Rust/pyo3 project — generated **outside** the tool
+tree so `aero-universal` stays pristine. It's the zero‑config path for "I have a
+`lib.rs`, give me a repo I can push to GitHub." Implemented in
+[`src/scaffold`](src/scaffold/).
+
+```bash
+# From a file anywhere — no need to move it into the tool directory
+aero scaffold --source-entry /content/lib.rs --distribution-directory ~/out/anyon --verbose
+
+# Or into a throwaway temp dir, and compile it too (with auto-recovery)
+aero scaffold --source-entry ../data/core.rs --build
+```
+
+**1. Flexible context paths (zero file relocation).** `--source-entry` resolves
+absolute paths (`/content/lib.rs`), relative paths (`../data/core.rs`, `~/x.rs`)
+and plain workspace‑relative paths. The file is **read from its exact location**
+and copied into the transient workspace — it is never moved and the engine never
+raises "source not found" for a file that plainly exists. The `[context]`
+ingestion path gained the same single‑file‑from‑anywhere support.
+
+**2. Out‑of‑tree workspace isolation.** Every manifest, directory layout,
+build‑cache stream and `target/` output goes to a **system temp dir**
+(auto‑cleaned) or to your `--distribution-directory` (kept — it's the
+deliverable). A guard *refuses* to materialise a workspace inside the tool tree,
+so a mis‑configured path can never clutter `aero-universal` again.
+
+**3. Complete standalone repository.** The generated folder is turn‑key:
+
+| File | Contents |
+|------|----------|
+| `Cargo.toml` | Inferred metadata + dependencies (`rug`, `pyo3`), `crate-type = ["cdylib"]` for a Python extension module. |
+| `src/lib.rs` | The corrected, **shielded** source. |
+| `.gitignore` | Ignores `target/`, `*.so`, `__pycache__`, … |
+| `README.md` | Build + use + verify instructions. |
+| `test_binding.py` | A quick Python import/verification check‑script. |
+
+```text
+~/out/anyon/
+├── Cargo.toml          # [lib] crate-type = ["cdylib"]; rug + pyo3 (extension-module)
+├── src/lib.rs          # shielded source
+├── .gitignore
+├── README.md
+└── test_binding.py
+# push it: cd ~/out/anyon && git init && git add . && git commit -m 'init'
+```
+
+**4. Semantic shields & auto‑error correction.** When the source contains `rug`
+or `pyo3` anchors, Aero applies the API fixes codified from live compile testing
+**during scaffolding**, idempotently:
+
+- **Hygienic extension‑trait injection** — `neg_mut` / `nth_root` compatibility
+  `impl`s are prepended *after* crate‑level inner attributes (`#![...]`, `//!`)
+  so they never collide with downstream `use` imports.
+- **Type‑cascading alignment** — `let q_dim = match sec { … }` index tables are
+  annotated `let q_dim: usize = match sec { … }` (only when the arms are
+  integer‑like), stopping a single inferred `i32` cascading downstream.
+- **Robust diagnostic recovery** — with `--build`, `cargo build` runs from the
+  generated repo; if it exits `101` on a mutability or type‑mismatch error, the
+  failing `src/lib.rs` is piped through the auto‑correction pass (e.g. `let x` →
+  `let mut x`) and the build is **re‑dispatched once**:
+
+```text
+[scaffold] build: attempt 1 failed (code 101); corrections: mut(acc)
+[scaffold] build: attempt 2 ok
+[scaffold] build: recovered after auto-correction
+```
+
+The subsystem is fully modular — `source_resolver`, `rust_shield`, `workspace`,
+`repo_generator`, `recovery` and the orchestrating `engine` are independently
+usable and tested.
+
 ### INI Format (Legacy)
 
 For legacy projects, the INI format is still supported. See the original [README](README_legacy.md) for details.
@@ -520,6 +594,7 @@ The `main.py` script provides several subcommands:
 | `runtime` | Execute runtime benchmarks and feed back into fitness |
 | `invariants` | Ingest unstructured context + code into the domain‑agnostic Invariant Schema |
 | `polymorphize` | Inspect the host and polymorphically rewrite generated code for it (see [Autonomous Hardware-Polymerization](#autonomous-hardware-polymerization)) |
+| `scaffold` | Generate a turn‑key standalone repo from a source file, out‑of‑tree (see [Standalone Repository Generator](#standalone-repository-generator)) |
 
 ### Common Options
 
