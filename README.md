@@ -142,7 +142,68 @@ rustup default stable
 
 ## Blueprint Reference
 
-The Aero Multi‑Tool supports **three blueprint formats**: the declarative **block DSL** (recommended, strictly validated before the build), modern **JSON**, and legacy **INI** (for backward compatibility).
+The Aero Multi‑Tool supports **four blueprint formats**: the ultra‑lean **Invisible Configuration Layer** (a few lines of pure intent — everything else inferred), the declarative **block DSL** (strictly validated before the build), modern **JSON**, and legacy **INI** (for backward compatibility).
+
+### Invisible Configuration Layer (ultra-lean)
+
+Shrink the whole blueprint to a few lines of **semantic intent**. The tool infers
+the entire execution DAG, per‑target languages, FFI/language boundaries and
+self‑healing error‑correction loops from the files in the project directory — so
+running `aero` requires **zero further input**. Implemented in
+[`src/invisible_config`](src/invisible_config/) (`DAGInferenceEngine` +
+`SelfHealingExecutor`, orchestrated by `InvisibleConfigEngine`).
+
+```aero
+project "biophysical_trader"
+
+ingest   = ["./research/genomics.md", "./research/market_liquidity.txt"]
+targets  = ["cpp_core", "python_dashboard"]
+optimize = "maximum_hardware"
+```
+
+**What gets inferred** by scanning the project directory:
+
+1. **Languages & sources** — each target name is matched against the file tree;
+   `cpp_core` → C++ (`core/*.cpp`), `python_dashboard` → Python (`dashboard/*.py`).
+2. **The execution DAG** — compiled "core" targets depend on the **text
+   invariants** extracted from the `ingest` files (the same Invariant Schema the
+   [Semantic Fluidity engine](#semantic-fluidity-engine) produces); dynamic
+   targets depend on the cores they call.
+3. **FFI / language boundaries** — C++↔Python via **pybind11**, Rust↔Python via
+   **PyO3**, C↔Python via **ctypes** — mapped automatically.
+4. **Self‑healing loops** — if a compile step fails on a **type mismatch at a
+   boundary**, the `SelfHealingExecutor` patches the glue code (inserts a cast /
+   coercion shim) and retries, up to a bounded number of attempts.
+
+The `optimize` intent word (`maximum_hardware` / `balanced` / `size` / `debug`)
+maps onto concrete optimizer flags and opt‑in subsystems (hardware
+polymorphization, GPU, numerical libraries).
+
+**Inspect the inferred graph (no build):**
+
+```bash
+python main.py infer                                        # uses ./blueprint.aero
+python main.py infer --blueprint blueprint.aero.lean.sample # a specific file
+python main.py infer --json                                 # machine-readable DAG
+```
+
+Example output:
+
+```text
+Inferred build graph for 'biophysical_trader' (optimize=maximum_hardware):
+  text invariants  : 2 ingested source(s) -> ./research/genomics.md, ./research/market_liquidity.txt
+  targets:
+    - cpp_core [cpp/core] 2 source(s); depends on: text_invariants
+    - python_dashboard [python/binding] 1 source(s); depends on: cpp_core
+  ffi / language boundaries:
+    - cpp_core (cpp) -> python_dashboard (python) via pybind11
+  execution order  : cpp_core -> python_dashboard
+  self-healing     : enabled (auto-patches glue-code type mismatches, retries)
+```
+
+A lean blueprint flows straight through `python main.py build` — the inferred
+graph plugs directly into the core execution system. See
+[`blueprint.aero.lean.sample`](blueprint.aero.lean.sample).
 
 ### JSON Format
 
@@ -282,6 +343,7 @@ The `main.py` script provides several subcommands:
 |---------|-------------|
 | `build` | Full build pipeline (scanner → decision tree → tuner → compiler) |
 | `check` | Strictly validate a block‑DSL `blueprint.aero` (no build) |
+| `infer` | Infer the full execution DAG from an ultra‑lean blueprint (see [Invisible Configuration Layer](#invisible-configuration-layer-ultra-lean)) |
 | `ingest` | Ingest external source trees, repair code, and integrate into the workspace |
 | `evolve` | Run only the evolutionary optimisation loop (without full build) |
 | `analyze` | Perform semantic analysis and generate UAST graph |

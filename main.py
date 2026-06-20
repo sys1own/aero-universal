@@ -625,6 +625,58 @@ def invariants_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def infer_command(args: argparse.Namespace) -> int:
+    """Infer the full execution DAG from an ultra-lean blueprint.
+
+    Parses the few lines of semantic intent in blueprint.aero, scans the project
+    directory, and prints the inferred targets, language/FFI boundaries,
+    dependencies and execution order -- the graph that `build` would run with no
+    further input.  With --json, emits the machine-readable inferred DAG.
+    """
+    from src.invisible_config import InvisibleConfigEngine, looks_like_lean_blueprint
+
+    workspace = Path(args.workspace).resolve()
+    bp_path = Path(args.blueprint) if args.blueprint else workspace / "blueprint.aero"
+    if not bp_path.exists():
+        print(f"{bp_path}: blueprint file not found", file=sys.stderr)
+        return 1
+
+    content = bp_path.read_text(encoding="utf-8")
+    if not looks_like_lean_blueprint(content):
+        print(
+            f"{bp_path}: not an ultra-lean blueprint; `infer` only applies to the "
+            "Invisible Configuration dialect (project \"name\" + ingest/targets/optimize).",
+            file=sys.stderr,
+        )
+        return 1
+
+    engine = InvisibleConfigEngine(bp_path.parent)
+    dag = engine.infer_from_source(content)
+
+    if getattr(args, "json", False):
+        print(json.dumps(dag.to_dict(), indent=2))
+        return 0
+
+    print(f"\nInferred build graph for '{dag.project}' (optimize={dag.optimize}):")
+    if dag.has_invariants:
+        print(f"  text invariants  : {len(dag.ingest)} ingested source(s) -> {', '.join(dag.ingest)}")
+    print("  targets:")
+    for target in dag.targets:
+        deps = ", ".join(target.depends_on) or "(none)"
+        print(f"    - {target.name} [{target.language}/{target.role}] "
+              f"{len(target.sources)} source(s); depends on: {deps}")
+    print("  ffi / language boundaries:")
+    if dag.ffi_boundaries:
+        for boundary in dag.ffi_boundaries:
+            print(f"    - {boundary.provider} ({boundary.provider_language}) -> "
+                  f"{boundary.consumer} ({boundary.consumer_language}) via {boundary.mechanism}")
+    else:
+        print("    (none)")
+    print(f"  execution order  : {' -> '.join(dag.topological_order())}")
+    print("  self-healing     : enabled (auto-patches glue-code type mismatches, retries)")
+    return 0
+
+
 def polymorphize_command(args: argparse.Namespace) -> int:
     """Inspect the host and polymorphically rewrite generated code for it.
 
@@ -791,6 +843,15 @@ def create_parser() -> argparse.ArgumentParser:
     invariants_parser.add_argument("--workspace", default=".", help="Workspace root (used to resolve the default report path)")
     invariants_parser.add_argument("--output", default=None, help="Explicit path for the invariant_schema_report.json")
     invariants_parser.set_defaults(handler=invariants_command)
+
+    # --- infer (invisible configuration layer) ---
+    infer_parser = subparsers.add_parser(
+        "infer", help="Infer the full execution DAG from an ultra-lean blueprint"
+    )
+    infer_parser.add_argument("--workspace", default=".", help="Workspace root containing blueprint.aero")
+    infer_parser.add_argument("--blueprint", default=None, help="Explicit path to a lean blueprint file")
+    infer_parser.add_argument("--json", action="store_true", help="Emit the inferred DAG as JSON")
+    infer_parser.set_defaults(handler=infer_command)
 
     # --- polymorphize (autonomous hardware-polymerization) ---
     poly_parser = subparsers.add_parser(
