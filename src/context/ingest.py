@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 
 from src.context.analyser import CodeAnalyser
 from src.context.repair import CodeRepairer
+from src.utils.serialization import dataclass_to_dict
 
 # Default include globs per language.
 _LANG_GLOBS = {
@@ -45,15 +46,7 @@ class IngestedFile:
     error: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "source": self.source,
-            "destination": self.destination,
-            "language": self.language,
-            "mode": self.mode,
-            "repairs": self.repairs,
-            "findings": self.findings,
-            "error": self.error,
-        }
+        return dataclass_to_dict(self)
 
 
 class ContextIngestor:

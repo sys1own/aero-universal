@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from src.utils.serialization import dataclass_to_dict
+
 
 @dataclass
 class BuildTask:
@@ -61,15 +63,11 @@ class BuildResult:
     error: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "task_id": self.task_id,
-            "worker": self.worker,
-            "success": self.success,
-            "returncode": self.returncode,
-            "duration": round(self.duration, 6),
-            "attempts": self.attempts,
-            "error": self.error,
-        }
+        return dataclass_to_dict(
+            self,
+            exclude=["stdout", "stderr", "value"],
+            round_keys={"duration": 6},
+        )
 
 
 # ----------------------------------------------------------------------

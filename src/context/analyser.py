@@ -16,7 +16,9 @@ import ast
 import builtins
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
+
+from src.utils.serialization import dataclass_to_dict
 
 _BUILTINS: Set[str] = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "self", "cls"}
 
@@ -32,15 +34,8 @@ class FileFindings:
     functions_missing_return_type: List[str] = field(default_factory=list)
     syntax_error: Optional[str] = None
 
-    def to_dict(self) -> Dict[str, object]:
-        return {
-            "path": self.path,
-            "language": self.language,
-            "undefined_names": self.undefined_names,
-            "unused_imports": self.unused_imports,
-            "functions_missing_return_type": self.functions_missing_return_type,
-            "syntax_error": self.syntax_error,
-        }
+    def to_dict(self) -> Dict[str, Any]:
+        return dataclass_to_dict(self)
 
 
 class CodeAnalyser:

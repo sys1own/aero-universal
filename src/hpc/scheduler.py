@@ -19,12 +19,14 @@ from __future__ import annotations
 import os
 import re
 import shutil
-import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from src.utils.serialization import dataclass_to_dict
+from src.utils.subprocess_utils import run_command
 
 Runner = Callable[[List[str]], Tuple[int, str, str]]
 
@@ -50,14 +52,9 @@ class HPCJob:
         return self.state == "COMPLETED"
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "job_id": self.job_id,
-            "scheduler": self.scheduler,
-            "name": self.name,
-            "state": self.state,
-            "returncode": self.returncode,
-            "error": self.error,
-        }
+        return dataclass_to_dict(
+            self, exclude=["script_path", "stdout", "stderr"]
+        )
 
 
 # Scheduler-specific command vocabulary.
@@ -314,14 +311,4 @@ class HPCScheduler:
 
     @staticmethod
     def _default_runner(cmd: List[str]) -> Tuple[int, str, str]:
-        try:
-            proc = subprocess.run(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False
-            )
-        except (OSError, subprocess.SubprocessError) as exc:
-            return 1, "", str(exc)
-        return (
-            proc.returncode,
-            proc.stdout.decode("utf-8", "replace"),
-            proc.stderr.decode("utf-8", "replace"),
-        )
+        return run_command(cmd)

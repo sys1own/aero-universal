@@ -25,6 +25,14 @@ import time
 from collections import OrderedDict, deque
 from enum import Enum, auto
 from typing import Any, Deque, Dict, List, Optional, Tuple
+
+from builder_brains.manifest_utils import (
+    get_cost_ceilings,
+    get_module_params,
+    get_thresholds,
+    load_manifest,
+)
+
 try:
     from builder_brains.experience_replay import ExperienceReplayBuffer
 except ImportError:
@@ -33,24 +41,6 @@ except ImportError:
     except ImportError:
         ExperienceReplayBuffer = None
 logger = logging.getLogger('builder_brains.decision_tree')
-_MANIFEST_PATH = os.path.join(os.path.dirname(__file__), 'build_manifest.json')
-
-def _load_manifest() -> Dict[str, Any]:
-    try:
-        with open(_MANIFEST_PATH, 'r', encoding='utf-8') as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning('Failed to load build_manifest.json: %s — using defaults', exc)
-        return {}
-
-def _get_dt_params(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('hyperparameter_weights', {}).get('decision_tree', {})
-
-def _get_thresholds(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('thresholds', {})
-
-def _get_cost_ceilings(manifest: Dict[str, Any]) -> Dict[str, Any]:
-    return manifest.get('execution_cost_ceilings', {})
 
 class Strategy(Enum):
     CONSERVATIVE = auto()
@@ -506,10 +496,10 @@ def evaluate(metadata: Dict[str, Any], hyper_params: Dict[str, Any]) -> Dict[str
     """
     start_time: float = time.monotonic()
     logger.info('Decision-tree pipeline started')
-    manifest: Dict[str, Any] = _load_manifest()
-    params: Dict[str, Any] = {**_get_dt_params(manifest), **hyper_params}
-    thresholds: Dict[str, Any] = _get_thresholds(manifest)
-    ceilings: Dict[str, Any] = _get_cost_ceilings(manifest)
+    manifest: Dict[str, Any] = load_manifest()
+    params: Dict[str, Any] = {**get_module_params(manifest, 'decision_tree'), **hyper_params}
+    thresholds: Dict[str, Any] = get_thresholds(manifest)
+    ceilings: Dict[str, Any] = get_cost_ceilings(manifest)
     wall_limit: float = ceilings.get('decision_tree_max_wall_seconds', 15.0)
     layer_count: int = int(params.get('heuristic_layer_count', 5))
     queue_capacity: int = int(params.get('priority_queue_capacity', 1024))
