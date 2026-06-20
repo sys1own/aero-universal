@@ -185,7 +185,8 @@ def _maybe_submit_hpc_build(context: dict, workspace: Path, args: argparse.Names
         print(f"[hpc] {scheduler.scheduler} CLI not found; building locally instead.")
         return False
 
-    build_cmd = f"python main.py build --workspace {workspace} --no-hpc --cycles {args.cycles}"
+    import shlex
+    build_cmd = f"python main.py build --workspace {shlex.quote(str(workspace))} --no-hpc --cycles {int(args.cycles)}"
     commands = [build_cmd]
     if scheduler.post_build_run and context.get("runtime", {}).get("benchmark_command"):
         commands.append(context["runtime"]["benchmark_command"])

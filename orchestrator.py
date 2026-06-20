@@ -4,6 +4,7 @@ import importlib
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -44,17 +45,38 @@ def _load_translator_callable() -> Optional[Any]:
         os.makedirs("build_sandbox", exist_ok=True)
         mod_id = f"variant_{uuid.uuid4().hex[:8]}"
         file_path = f"build_sandbox/{mod_id}.py"
+
+        # Validate the variant code parses as valid Python before writing.
+        try:
+            tree = ast.parse(variant_code_str)
+        except SyntaxError:
+            return {"module": "", "callable_name": "", "error": "invalid syntax"}
+
+        # Reject code that imports dangerous modules or uses dangerous builtins.
+        _BLOCKED_MODULES = frozenset({"os", "sys", "subprocess", "shutil", "socket",
+                                       "ctypes", "signal", "importlib"})
+        _BLOCKED_ATTRS = frozenset({"eval", "exec", "compile", "__import__",
+                                     "getattr", "globals", "locals"})
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name.split(".")[0] in _BLOCKED_MODULES:
+                        return {"module": "", "callable_name": "", "error": f"blocked import: {alias.name}"}
+            elif isinstance(node, ast.ImportFrom):
+                if node.module and node.module.split(".")[0] in _BLOCKED_MODULES:
+                    return {"module": "", "callable_name": "", "error": f"blocked import: {node.module}"}
+            elif isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and func.id in _BLOCKED_ATTRS:
+                    return {"module": "", "callable_name": "", "error": f"blocked builtin: {func.id}"}
+
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(variant_code_str)
         callable_name = "main"
-        try:
-            tree = ast.parse(variant_code_str)
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    callable_name = node.name
-                    break
-        except:
-            pass
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                callable_name = node.name
+                break
         return {"module": f"build_sandbox.{mod_id}", "callable_name": callable_name}
     return live_translate_variant
 
@@ -682,7 +704,10 @@ def _record_experience_status(metadata: Dict[str, Any]) -> str:
 
 
 def _render_telemetry(telemetry: CycleTelemetry) -> None:
-    os.system("cls" if os.name == "nt" else "clear")
+    if os.name == "nt":
+        subprocess.run(["cmd", "/c", "cls"], check=False)
+    else:
+        subprocess.run(["clear"], check=False)
     print("=" * 78)
     print(" BUILDER ORCHESTRATION TELEMETRY")
     print("=" * 78)

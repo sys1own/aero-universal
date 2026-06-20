@@ -184,9 +184,10 @@ class SSHBackend(WorkerBackend):
             )
         try:
             conn = self._connect()
-            command = " ".join(task.command)
+            import shlex
+            command = " ".join(shlex.quote(part) for part in task.command)
             if task.cwd:
-                command = f"cd {task.cwd} && {command}"
+                command = f"cd {shlex.quote(task.cwd)} && {command}"
             result = conn.run(command, hide=True, warn=True)
             return BuildResult(
                 task_id=task.task_id,
