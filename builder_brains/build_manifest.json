@@ -1,0 +1,904 @@
+{
+  "hyperparameter_weights": {
+    "scanner": {
+      "concurrent_worker_pool_size": 8,
+      "max_file_scan_bytes": 10485760,
+      "anomaly_zscore_threshold": 2.5,
+      "token_ngram_window": 4,
+      "structural_similarity_cutoff": 0.8
+    },
+    "decision_tree": {
+      "discount_gamma": 0.97,
+      "penalty": 0.02,
+      "confidence_minimum": 0.6,
+      "stall_patience": 15,
+      "velocity_epsilon": 0.005,
+      "acceleration_epsilon": 0.005
+    },
+    "parameter_tuner": {
+      "initial_learning_rate": 0.01,
+      "min_learning_rate": 1e-05,
+      "annealing_schedule": "cosine_warm_restart",
+      "warmup_cycles": 50,
+      "restart_period_multiplier": 2.0,
+      "population_size": 64,
+      "elite_survival_ratio": 0.2,
+      "mutation_sigma": 0.05,
+      "crossover_probability": 0.7,
+      "tournament_k": 3
+    },
+    "compactor": {
+      "dead_code_elimination_depth": 4,
+      "identifier_collision_salt_bits": 32,
+      "minification_entropy_cap": 0.85
+    }
+  },
+  "thresholds": {
+    "scan_coverage_target": 0.95,
+    "anomaly_alert_ceiling": 50,
+    "stagnation_patience_cycles": 200,
+    "min_improvement_delta": 0.0005,
+    "parameter_drift_max": 0.3,
+    "global_convergence_tolerance": 0.0001,
+    "compaction_ratio_floor": 0.1
+  },
+  "execution_cost_ceilings": {
+    "scanner_max_wall_seconds": 60.0,
+    "decision_tree_max_wall_seconds": 30.0,
+    "parameter_tuner_max_wall_seconds": 45.0,
+    "total_pipeline_budget_seconds": 120.0,
+    "max_memory_mb": 2048
+  },
+  "scoring": {
+    "fitness_history_window": 100,
+    "ema_alpha": 0.1
+  },
+  "parameters": {
+    "decision_tree_resolved_strategy": "balanced"
+  },
+  "current_cycle": 1,
+  "last_handshake_status": "ok",
+  "orchestrator_state": {
+    "current_cycle": 2,
+    "score_trajectory": [],
+    "kinetic_stall_cycles": 0,
+    "pareto_frontier": [
+      {
+        "uid": 65,
+        "config": {
+          "learning_rate": 1.2e-05,
+          "mutation_sigma": 0.074387,
+          "crossover_probability": 0.528597,
+          "population_size": 54.0,
+          "tournament_k": 5.0,
+          "elite_ratio": 0.182296,
+          "exploration_epsilon": 0.384095,
+          "discount_gamma": 0.998599
+        },
+        "fitness": [
+          0.953889,
+          3.461864,
+          0.979182
+        ],
+        "objectives": {
+          "accuracy_score": 0.953889,
+          "inverse_wall_seconds": 3.461864,
+          "compression_ratio": 0.979182
+        },
+        "rank": 0,
+        "crowding_distance": "inf",
+        "generation": 0,
+        "parent_id": null
+      },
+      {
+        "uid": 71,
+        "config": {
+          "exploration_epsilon": 0.01,
+          "crossover_probability": 0.543477,
+          "tournament_k": 3.0,
+          "population_size": 165.0,
+          "learning_rate": 0.079879,
+          "elite_ratio": 0.326335,
+          "discount_gamma": 0.872785,
+          "mutation_sigma": 0.372343
+        },
+        "fitness": [
+          0.428651,
+          14.312959,
+          0.175516
+        ],
+        "objectives": {
+          "accuracy_score": 0.428651,
+          "inverse_wall_seconds": 14.312959,
+          "compression_ratio": 0.175516
+        },
+        "rank": 0,
+        "crowding_distance": "inf",
+        "generation": 0,
+        "parent_id": null
+      },
+      {
+        "uid": 76,
+        "config": {
+          "exploration_epsilon": 0.287614,
+          "crossover_probability": 0.205116,
+          "tournament_k": 7.0,
+          "population_size": 77.0,
+          "learning_rate": 1e-05,
+          "elite_ratio": 0.074921,
+          "discount_gamma": 0.895821,
+          "mutation_sigma": 0.388233
+        },
+        "fitness": [
+          0.828493,
+          7.317015,
+          0.872772
+        ],
+        "objectives": {
+          "accuracy_score": 0.828493,
+          "inverse_wall_seconds": 7.317015,
+          "compression_ratio": 0.872772
+        },
+        "rank": 0,
+        "crowding_distance": 1.098431,
+        "generation": 0,
+        "parent_id": null
+      },
+      {
+        "uid": 97,
+        "config": {
+          "exploration_epsilon": 0.262842,
+          "crossover_probability": 0.741889,
+          "tournament_k": 5.0,
+          "population_size": 184.0,
+          "learning_rate": 0.169193,
+          "elite_ratio": 0.05,
+          "discount_gamma": 0.970308,
+          "mutation_sigma": 0.278651
+        },
+        "fitness": [
+          0.363615,
+          7.343327,
+          0.67395
+        ],
+        "objectives": {
+          "accuracy_score": 0.363615,
+          "inverse_wall_seconds": 7.343327,
+          "compression_ratio": 0.67395
+        },
+        "rank": 0,
+        "crowding_distance": "inf",
+        "generation": 0,
+        "parent_id": null
+      },
+      {
+        "uid": 125,
+        "config": {
+          "exploration_epsilon": 0.385843,
+          "crossover_probability": 0.754082,
+          "tournament_k": 3.0,
+          "population_size": 206.0,
+          "learning_rate": 0.040257,
+          "elite_ratio": 0.5,
+          "discount_gamma": 0.9999,
+          "mutation_sigma": 0.411783
+        },
+        "fitness": [
+          0.740842,
+          9.452358,
+          0.667647
+        ],
+        "objectives": {
+          "accuracy_score": 0.740842,
+          "inverse_wall_seconds": 9.452358,
+          "compression_ratio": 0.667647
+        },
+        "rank": 0,
+        "crowding_distance": 1.939883,
+        "generation": 0,
+        "parent_id": null
+      }
+    ],
+    "tuned_population": [
+      {
+        "learning_rate": 1.2e-05,
+        "mutation_sigma": 0.074387,
+        "crossover_probability": 0.528597,
+        "population_size": 54.0,
+        "tournament_k": 5.0,
+        "elite_ratio": 0.182296,
+        "exploration_epsilon": 0.384095,
+        "discount_gamma": 0.998599
+      },
+      {
+        "exploration_epsilon": 0.01,
+        "crossover_probability": 0.543477,
+        "tournament_k": 3.0,
+        "population_size": 165.0,
+        "learning_rate": 0.079879,
+        "elite_ratio": 0.326335,
+        "discount_gamma": 0.872785,
+        "mutation_sigma": 0.372343
+      },
+      {
+        "exploration_epsilon": 0.287614,
+        "crossover_probability": 0.205116,
+        "tournament_k": 7.0,
+        "population_size": 77.0,
+        "learning_rate": 1e-05,
+        "elite_ratio": 0.074921,
+        "discount_gamma": 0.895821,
+        "mutation_sigma": 0.388233
+      },
+      {
+        "exploration_epsilon": 0.262842,
+        "crossover_probability": 0.741889,
+        "tournament_k": 5.0,
+        "population_size": 184.0,
+        "learning_rate": 0.169193,
+        "elite_ratio": 0.05,
+        "discount_gamma": 0.970308,
+        "mutation_sigma": 0.278651
+      },
+      {
+        "exploration_epsilon": 0.385843,
+        "crossover_probability": 0.754082,
+        "tournament_k": 3.0,
+        "population_size": 206.0,
+        "learning_rate": 0.040257,
+        "elite_ratio": 0.5,
+        "discount_gamma": 0.9999,
+        "mutation_sigma": 0.411783
+      },
+      {
+        "crossover_probability": 0.317648,
+        "elite_ratio": 0.181845,
+        "discount_gamma": 0.829399,
+        "tournament_k": 9.0,
+        "population_size": 45.0,
+        "learning_rate": 0.02015,
+        "exploration_epsilon": 0.336446,
+        "mutation_sigma": 0.248848
+      },
+      {
+        "crossover_probability": 0.507739,
+        "elite_ratio": 0.300027,
+        "discount_gamma": 0.808347,
+        "tournament_k": 3.0,
+        "population_size": 165.0,
+        "learning_rate": 0.045858,
+        "exploration_epsilon": 0.315098,
+        "mutation_sigma": 0.213224
+      },
+      {
+        "crossover_probability": 0.95,
+        "elite_ratio": 0.5,
+        "discount_gamma": 0.9999,
+        "tournament_k": 3.0,
+        "population_size": 170.0,
+        "learning_rate": 0.028068,
+        "exploration_epsilon": 0.403766,
+        "mutation_sigma": 0.001
+      },
+      {
+        "crossover_probability": 0.49848,
+        "elite_ratio": 0.464418,
+        "discount_gamma": 0.901758,
+        "tournament_k": 7.0,
+        "population_size": 110.0,
+        "learning_rate": 0.067654,
+        "exploration_epsilon": 0.01,
+        "mutation_sigma": 0.117416
+      },
+      {
+        "crossover_probability": 0.807009,
+        "elite_ratio": 0.436693,
+        "discount_gamma": 0.9999,
+        "tournament_k": 4.0,
+        "population_size": 158.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.388464,
+        "mutation_sigma": 0.441093
+      },
+      {
+        "crossover_probability": 0.139955,
+        "elite_ratio": 0.144723,
+        "discount_gamma": 0.8,
+        "tournament_k": 9.0,
+        "population_size": 30.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.367488,
+        "mutation_sigma": 0.431379
+      },
+      {
+        "crossover_probability": 0.585624,
+        "elite_ratio": 0.222878,
+        "discount_gamma": 0.9999,
+        "tournament_k": 8.0,
+        "population_size": 75.0,
+        "learning_rate": 0.042524,
+        "exploration_epsilon": 0.302042,
+        "mutation_sigma": 0.5
+      },
+      {
+        "crossover_probability": 0.350484,
+        "elite_ratio": 0.364818,
+        "discount_gamma": 0.9999,
+        "tournament_k": 7.0,
+        "population_size": 150.0,
+        "learning_rate": 0.14478,
+        "exploration_epsilon": 0.01,
+        "mutation_sigma": 0.180446
+      },
+      {
+        "crossover_probability": 0.539434,
+        "elite_ratio": 0.155051,
+        "discount_gamma": 0.906367,
+        "tournament_k": 7.0,
+        "population_size": 110.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.19222,
+        "mutation_sigma": 0.001
+      },
+      {
+        "crossover_probability": 0.486551,
+        "elite_ratio": 0.2745,
+        "discount_gamma": 0.96941,
+        "tournament_k": 3.0,
+        "population_size": 86.0,
+        "learning_rate": 0.077565,
+        "exploration_epsilon": 0.034918,
+        "mutation_sigma": 0.422605
+      },
+      {
+        "crossover_probability": 0.514699,
+        "elite_ratio": 0.452938,
+        "discount_gamma": 0.9999,
+        "tournament_k": 3.0,
+        "population_size": 110.0,
+        "learning_rate": 0.047173,
+        "exploration_epsilon": 0.01,
+        "mutation_sigma": 0.424241
+      },
+      {
+        "crossover_probability": 0.651168,
+        "elite_ratio": 0.304098,
+        "discount_gamma": 0.948153,
+        "tournament_k": 7.0,
+        "population_size": 134.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.124078,
+        "mutation_sigma": 0.147125
+      },
+      {
+        "crossover_probability": 0.563266,
+        "elite_ratio": 0.46541,
+        "discount_gamma": 0.944112,
+        "tournament_k": 4.0,
+        "population_size": 38.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.401537,
+        "mutation_sigma": 0.336718
+      },
+      {
+        "crossover_probability": 0.697611,
+        "elite_ratio": 0.05,
+        "discount_gamma": 0.989968,
+        "tournament_k": 7.0,
+        "population_size": 184.0,
+        "learning_rate": 0.120628,
+        "exploration_epsilon": 0.206421,
+        "mutation_sigma": 0.124321
+      },
+      {
+        "crossover_probability": 0.602637,
+        "elite_ratio": 0.281133,
+        "discount_gamma": 0.8,
+        "tournament_k": 3.0,
+        "population_size": 165.0,
+        "learning_rate": 0.100431,
+        "exploration_epsilon": 0.317532,
+        "mutation_sigma": 0.415165
+      },
+      {
+        "crossover_probability": 0.533891,
+        "elite_ratio": 0.155585,
+        "discount_gamma": 0.9999,
+        "tournament_k": 7.0,
+        "population_size": 62.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.372409,
+        "mutation_sigma": 0.092497
+      },
+      {
+        "crossover_probability": 0.449725,
+        "elite_ratio": 0.490016,
+        "discount_gamma": 0.811279,
+        "tournament_k": 7.0,
+        "population_size": 189.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.281294,
+        "mutation_sigma": 0.419776
+      },
+      {
+        "crossover_probability": 0.917092,
+        "elite_ratio": 0.226394,
+        "discount_gamma": 0.802027,
+        "tournament_k": 7.0,
+        "population_size": 110.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.189818,
+        "mutation_sigma": 0.050103
+      },
+      {
+        "crossover_probability": 0.52909,
+        "elite_ratio": 0.295192,
+        "discount_gamma": 0.98474,
+        "tournament_k": 5.0,
+        "population_size": 54.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.380725,
+        "mutation_sigma": 0.09274
+      },
+      {
+        "crossover_probability": 0.534886,
+        "elite_ratio": 0.201554,
+        "discount_gamma": 0.950074,
+        "tournament_k": 5.0,
+        "population_size": 54.0,
+        "learning_rate": 0.028642,
+        "exploration_epsilon": 0.342601,
+        "mutation_sigma": 0.148182
+      },
+      {
+        "crossover_probability": 0.618842,
+        "elite_ratio": 0.063416,
+        "discount_gamma": 0.89605,
+        "tournament_k": 5.0,
+        "population_size": 73.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.29516,
+        "mutation_sigma": 0.4066
+      },
+      {
+        "crossover_probability": 0.676033,
+        "elite_ratio": 0.05,
+        "discount_gamma": 0.999034,
+        "tournament_k": 7.0,
+        "population_size": 201.0,
+        "learning_rate": 0.087847,
+        "exploration_epsilon": 0.204135,
+        "mutation_sigma": 0.193171
+      },
+      {
+        "crossover_probability": 0.897392,
+        "elite_ratio": 0.265153,
+        "discount_gamma": 0.951725,
+        "tournament_k": 5.0,
+        "population_size": 20.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.281897,
+        "mutation_sigma": 0.5
+      },
+      {
+        "crossover_probability": 0.287374,
+        "elite_ratio": 0.100407,
+        "discount_gamma": 0.8,
+        "tournament_k": 9.0,
+        "population_size": 45.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.217347,
+        "mutation_sigma": 0.001
+      },
+      {
+        "crossover_probability": 0.913005,
+        "elite_ratio": 0.338348,
+        "discount_gamma": 0.921756,
+        "tournament_k": 5.0,
+        "population_size": 54.0,
+        "learning_rate": 0.07349,
+        "exploration_epsilon": 0.2192,
+        "mutation_sigma": 0.05867
+      },
+      {
+        "crossover_probability": 0.476816,
+        "elite_ratio": 0.207771,
+        "discount_gamma": 0.8,
+        "tournament_k": 4.0,
+        "population_size": 21.0,
+        "learning_rate": 0.064904,
+        "exploration_epsilon": 0.114566,
+        "mutation_sigma": 0.396578
+      },
+      {
+        "crossover_probability": 0.390795,
+        "elite_ratio": 0.331996,
+        "discount_gamma": 0.9999,
+        "tournament_k": 7.0,
+        "population_size": 65.0,
+        "learning_rate": 0.008378,
+        "exploration_epsilon": 0.457456,
+        "mutation_sigma": 0.018811
+      },
+      {
+        "crossover_probability": 0.465578,
+        "elite_ratio": 0.05,
+        "discount_gamma": 0.839576,
+        "tournament_k": 10.0,
+        "population_size": 179.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.214055,
+        "mutation_sigma": 0.42137
+      },
+      {
+        "crossover_probability": 0.575057,
+        "elite_ratio": 0.201141,
+        "discount_gamma": 0.960922,
+        "tournament_k": 5.0,
+        "population_size": 54.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.352058,
+        "mutation_sigma": 0.44488
+      },
+      {
+        "crossover_probability": 0.502503,
+        "elite_ratio": 0.237026,
+        "discount_gamma": 0.96273,
+        "tournament_k": 4.0,
+        "population_size": 86.0,
+        "learning_rate": 0.291796,
+        "exploration_epsilon": 0.173487,
+        "mutation_sigma": 0.224683
+      },
+      {
+        "crossover_probability": 0.810362,
+        "elite_ratio": 0.243502,
+        "discount_gamma": 0.877896,
+        "tournament_k": 8.0,
+        "population_size": 28.0,
+        "learning_rate": 1.0,
+        "exploration_epsilon": 0.12434,
+        "mutation_sigma": 0.432955
+      },
+      {
+        "crossover_probability": 0.513819,
+        "elite_ratio": 0.5,
+        "discount_gamma": 0.892814,
+        "tournament_k": 8.0,
+        "population_size": 93.0,
+        "learning_rate": 0.019693,
+        "exploration_epsilon": 0.177766,
+        "mutation_sigma": 0.199797
+      },
+      {
+        "crossover_probability": 0.722751,
+        "elite_ratio": 0.152048,
+        "discount_gamma": 0.855861,
+        "tournament_k": 6.0,
+        "population_size": 86.0,
+        "learning_rate": 0.005469,
+        "exploration_epsilon": 0.105259,
+        "mutation_sigma": 0.15277
+      },
+      {
+        "crossover_probability": 0.291875,
+        "elite_ratio": 0.205817,
+        "discount_gamma": 0.953166,
+        "tournament_k": 8.0,
+        "population_size": 113.0,
+        "learning_rate": 0.071904,
+        "exploration_epsilon": 0.018602,
+        "mutation_sigma": 0.192051
+      },
+      {
+        "crossover_probability": 0.280077,
+        "elite_ratio": 0.114567,
+        "discount_gamma": 0.998769,
+        "tournament_k": 7.0,
+        "population_size": 110.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.060987,
+        "mutation_sigma": 0.107397
+      },
+      {
+        "crossover_probability": 0.241112,
+        "elite_ratio": 0.165454,
+        "discount_gamma": 0.89335,
+        "tournament_k": 10.0,
+        "population_size": 119.0,
+        "learning_rate": 0.000224,
+        "exploration_epsilon": 0.198621,
+        "mutation_sigma": 0.228492
+      },
+      {
+        "crossover_probability": 0.608453,
+        "elite_ratio": 0.365764,
+        "discount_gamma": 0.855749,
+        "tournament_k": 7.0,
+        "population_size": 189.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.247853,
+        "mutation_sigma": 0.349346
+      },
+      {
+        "crossover_probability": 0.95,
+        "elite_ratio": 0.204927,
+        "discount_gamma": 0.905211,
+        "tournament_k": 5.0,
+        "population_size": 195.0,
+        "learning_rate": 0.129342,
+        "exploration_epsilon": 0.104306,
+        "mutation_sigma": 0.305465
+      },
+      {
+        "crossover_probability": 0.884057,
+        "elite_ratio": 0.448105,
+        "discount_gamma": 0.878628,
+        "tournament_k": 10.0,
+        "population_size": 72.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.01,
+        "mutation_sigma": 0.074037
+      },
+      {
+        "crossover_probability": 0.739902,
+        "elite_ratio": 0.447235,
+        "discount_gamma": 0.9999,
+        "tournament_k": 5.0,
+        "population_size": 184.0,
+        "learning_rate": 0.241767,
+        "exploration_epsilon": 0.234838,
+        "mutation_sigma": 0.314573
+      },
+      {
+        "crossover_probability": 0.682127,
+        "elite_ratio": 0.400405,
+        "discount_gamma": 0.950068,
+        "tournament_k": 7.0,
+        "population_size": 110.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.220039,
+        "mutation_sigma": 0.164033
+      },
+      {
+        "crossover_probability": 0.264279,
+        "elite_ratio": 0.218169,
+        "discount_gamma": 0.964516,
+        "tournament_k": 7.0,
+        "population_size": 110.0,
+        "learning_rate": 0.000484,
+        "exploration_epsilon": 0.152006,
+        "mutation_sigma": 0.001
+      },
+      {
+        "crossover_probability": 0.577351,
+        "elite_ratio": 0.269414,
+        "discount_gamma": 0.977695,
+        "tournament_k": 7.0,
+        "population_size": 156.0,
+        "learning_rate": 0.008734,
+        "exploration_epsilon": 0.301599,
+        "mutation_sigma": 0.084217
+      },
+      {
+        "crossover_probability": 0.1,
+        "elite_ratio": 0.154783,
+        "discount_gamma": 0.918001,
+        "tournament_k": 8.0,
+        "population_size": 153.0,
+        "learning_rate": 0.050981,
+        "exploration_epsilon": 0.362262,
+        "mutation_sigma": 0.407296
+      },
+      {
+        "crossover_probability": 0.859477,
+        "elite_ratio": 0.394125,
+        "discount_gamma": 0.820886,
+        "tournament_k": 3.0,
+        "population_size": 165.0,
+        "learning_rate": 0.097951,
+        "exploration_epsilon": 0.24509,
+        "mutation_sigma": 0.061473
+      },
+      {
+        "crossover_probability": 0.85488,
+        "elite_ratio": 0.239123,
+        "discount_gamma": 0.9999,
+        "tournament_k": 7.0,
+        "population_size": 20.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.128992,
+        "mutation_sigma": 0.270326
+      },
+      {
+        "crossover_probability": 0.763705,
+        "elite_ratio": 0.298521,
+        "discount_gamma": 0.860354,
+        "tournament_k": 5.0,
+        "population_size": 206.0,
+        "learning_rate": 0.120213,
+        "exploration_epsilon": 0.394563,
+        "mutation_sigma": 0.362118
+      },
+      {
+        "crossover_probability": 0.589546,
+        "elite_ratio": 0.05,
+        "discount_gamma": 0.8,
+        "tournament_k": 2.0,
+        "population_size": 60.0,
+        "learning_rate": 0.097342,
+        "exploration_epsilon": 0.286802,
+        "mutation_sigma": 0.074076
+      },
+      {
+        "crossover_probability": 0.420281,
+        "elite_ratio": 0.154748,
+        "discount_gamma": 0.9999,
+        "tournament_k": 7.0,
+        "population_size": 54.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.270737,
+        "mutation_sigma": 0.363063
+      },
+      {
+        "crossover_probability": 0.73669,
+        "elite_ratio": 0.5,
+        "discount_gamma": 0.923056,
+        "tournament_k": 7.0,
+        "population_size": 43.0,
+        "learning_rate": 0.025136,
+        "exploration_epsilon": 0.476387,
+        "mutation_sigma": 0.131357
+      },
+      {
+        "crossover_probability": 0.382141,
+        "elite_ratio": 0.146578,
+        "discount_gamma": 0.923163,
+        "tournament_k": 10.0,
+        "population_size": 73.0,
+        "learning_rate": 0.092185,
+        "exploration_epsilon": 0.34621,
+        "mutation_sigma": 0.165749
+      },
+      {
+        "crossover_probability": 0.407052,
+        "elite_ratio": 0.05,
+        "discount_gamma": 0.9999,
+        "tournament_k": 5.0,
+        "population_size": 54.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.329902,
+        "mutation_sigma": 0.133427
+      },
+      {
+        "crossover_probability": 0.518435,
+        "elite_ratio": 0.064271,
+        "discount_gamma": 0.9999,
+        "tournament_k": 6.0,
+        "population_size": 58.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.388323,
+        "mutation_sigma": 0.015386
+      },
+      {
+        "crossover_probability": 0.510892,
+        "elite_ratio": 0.185199,
+        "discount_gamma": 0.992278,
+        "tournament_k": 5.0,
+        "population_size": 54.0,
+        "learning_rate": 0.004098,
+        "exploration_epsilon": 0.393602,
+        "mutation_sigma": 0.093224
+      },
+      {
+        "crossover_probability": 0.548957,
+        "elite_ratio": 0.415717,
+        "discount_gamma": 0.950189,
+        "tournament_k": 7.0,
+        "population_size": 206.0,
+        "learning_rate": 0.101263,
+        "exploration_epsilon": 0.360624,
+        "mutation_sigma": 0.323935
+      },
+      {
+        "crossover_probability": 0.35173,
+        "elite_ratio": 0.05,
+        "discount_gamma": 0.973786,
+        "tournament_k": 5.0,
+        "population_size": 28.0,
+        "learning_rate": 0.16329,
+        "exploration_epsilon": 0.364172,
+        "mutation_sigma": 0.243243
+      },
+      {
+        "crossover_probability": 0.579932,
+        "elite_ratio": 0.248279,
+        "discount_gamma": 0.994331,
+        "tournament_k": 7.0,
+        "population_size": 189.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.017641,
+        "mutation_sigma": 0.251834
+      },
+      {
+        "crossover_probability": 0.534282,
+        "elite_ratio": 0.5,
+        "discount_gamma": 0.901412,
+        "tournament_k": 6.0,
+        "population_size": 167.0,
+        "learning_rate": 1e-05,
+        "exploration_epsilon": 0.25952,
+        "mutation_sigma": 0.23752
+      },
+      {
+        "crossover_probability": 0.558161,
+        "elite_ratio": 0.198753,
+        "discount_gamma": 0.91357,
+        "tournament_k": 7.0,
+        "population_size": 110.0,
+        "learning_rate": 0.09641,
+        "exploration_epsilon": 0.15724,
+        "mutation_sigma": 0.155797
+      }
+    ],
+    "survival_tracker_stats": {
+      "total_generations": 1,
+      "frontier_size": 5,
+      "archive_capacity": 77,
+      "hypervolume": 7.443025,
+      "best_hypervolume": 7.443025,
+      "ema_hypervolume": 1.040288,
+      "objective_bests": {
+        "accuracy_score": 0.953889,
+        "inverse_wall_seconds": 14.312959,
+        "compression_ratio": 0.979182
+      },
+      "cycles_without_improvement": 0,
+      "is_stagnant": false,
+      "history_size": 1,
+      "recent_mean_hypervolume": 7.443025,
+      "recent_max_hypervolume": 7.443025,
+      "recent_min_hypervolume": 7.443025
+    },
+    "baseline_config": {
+      "exploration_epsilon": 0.287614,
+      "crossover_probability": 0.205116,
+      "tournament_k": 7.0,
+      "population_size": 77.0,
+      "learning_rate": 1e-05,
+      "elite_ratio": 0.074921,
+      "discount_gamma": 0.895821,
+      "mutation_sigma": 0.388233
+    },
+    "previous_fingerprints": {
+      "/home/ubuntu/repos/aero-build-engine/builder_brains/__init__.py": "3e0e3db75cec4b0526debc48491f86fde2e1a766fbca9bd1d7bc2070ea7c78d5",
+      "/home/ubuntu/repos/aero-build-engine/blueprint_parser.py": "6c4bf4b88fe9de4ee9a9912deea8dc0a2e44b968953903023e79f7fc238fa50b",
+      "/home/ubuntu/repos/aero-build-engine/builder_brains/experience_replay.py": "2ffbd9e5cd2a09f507a91f477b83335f742d5fabe809e019fbb45a06d9a41c9d",
+      "/home/ubuntu/repos/aero-build-engine/README.md": "3139d4aae91044c6f359e37d5692d92d82ea82681e952b3eaab8586024851090",
+      "/home/ubuntu/repos/aero-build-engine/builder_brains/compactor.py": "83033db0cfbd39e302d74b7acc99d4c3768b441c9814eed0bf361003441d7916",
+      "/home/ubuntu/repos/aero-build-engine/builder_brains/decision_tree.py": "a1d87ffccd10f1c0fe951825cf58e18f77c0f33763b165cc7fdf07c75a763354",
+      "/home/ubuntu/repos/aero-build-engine/main.py": "9375bc46d99c0100822fefd5643409c6b25f78485c6655b2028616ef10f0fdef",
+      "/home/ubuntu/repos/aero-build-engine/requirements.txt": "188fd989d8cfc2a28e423307339c920b7804986efa89b0fe7013423b08cb4b89",
+      "/home/ubuntu/repos/aero-build-engine/builder_brains/parameter_tuner.py": "9fe5b2a5901aa01e299fafa89bb18f10ad69a5d6359bb8117845dc200c486890",
+      "/home/ubuntu/repos/aero-build-engine/sandbox_runner.py": "49e107dc9f28d952e47d94c6609178d25e3bae2b5c5d7b3c82ecacadd560eae2",
+      "/home/ubuntu/repos/aero-build-engine/builder_brains/scanner.py": "21151b4ed2fe0db21b92af25eaee3026e2c0513ad2bae5ba77d933ea7fa20930",
+      "/home/ubuntu/repos/aero-build-engine/test_blueprint_parser.py": "d7d15586bd86c11e7743946d6b6984e109912c3002fd1daea0f90c114fcd67fe",
+      "/home/ubuntu/repos/aero-build-engine/translator/aero_translator.py": "07e17e089ada6512d301cc2b905f99124a82032081579e2527a65a948b7a090f",
+      "/home/ubuntu/repos/aero-build-engine/translator/__init__.py": "6d4dadb2f86113de9387b1a8543cf415435bcf05010f3e7adc9a1868a4ed8327",
+      "/home/ubuntu/repos/aero-build-engine/orchestrator.py": "5b0077fecb911ef12c0f543b1d0de2db971411ac3c4f7eacba1a27783dc7336a",
+      "/home/ubuntu/repos/aero-build-engine/translator/bytecode_mapper.py": "0ed0a5a9c6a4c46025c60706c7ba94f3db5ff0565b9cb679f2cb99710b9343ff",
+      "/home/ubuntu/repos/aero-build-engine/translator/cold_pass_router.py": "74a90f5bd588aa319e0955c6ed70980544242c23b5dd698f01bb09d5c71fef8f",
+      "/home/ubuntu/repos/aero-build-engine/translator/diff_sandbox.py": "87fbfc58191fec9e44ccc4f1c831745e42375c1c93eaf7e8cd9093fc7cd3c2b5",
+      "/home/ubuntu/repos/aero-build-engine/translator/ffi_generator.py": "461561c76aa395c5050920c760332a8180b0100a17216d55f3e351a3069f48af",
+      "/home/ubuntu/repos/aero-build-engine/translator/ffi_codegen.py": "07c460b3606129187300dff32fc2408641aa1fdc312f251a7d321c4879b1772a",
+      "/home/ubuntu/repos/aero-build-engine/translator/entropy_filter.py": "da6b3b698d88d1caf4cbbfc6d84dbca1126753cf1ace7d308913db8220c8de16",
+      "/home/ubuntu/repos/aero-build-engine/translator/hotpath_scanner.py": "3d9f85518e074a631be91b5c4e4b0052647d2ced5aa344248a7a6c8120413ebc",
+      "/home/ubuntu/repos/aero-build-engine/translator/pipeline.py": "0b3a5d9b7319b6318fe651214bc3cdda25f1d4a8ca9ff83c267bc3c8d91e0f3e",
+      "/home/ubuntu/repos/aero-build-engine/translator/ffi_isolation.py": "6e1ac62110458b536836192643dffb5f3df55f612c6578b56250f5b6475d8f9c",
+      "/home/ubuntu/repos/aero-build-engine/translator/code_profiler.py": "c7e8831732acbb9aea8f58655b0aa9986a447aa0179616a048d92431eb503afa",
+      "/home/ubuntu/repos/aero-build-engine/translator/rust_ast.py": "9f25ea2794228de551973f5e22399deb9516fc30044f556ca7c1230bd22fc869",
+      "/home/ubuntu/repos/aero-build-engine/translator/translation_pipeline.py": "35bd9432a7bcd39a272ebfb6eb358cf583129a944fb25c1bc0a8aa0a058f2fb8"
+    },
+    "accepted_neural_variants": []
+  }
+}

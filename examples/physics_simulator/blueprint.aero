@@ -1,0 +1,66 @@
+# =============================================================================
+# Example blueprint.aero for a large-scale, absolute-precision physics simulator.
+#
+# Python orchestrates; Rust provides the core numerics; C and Fortran cover
+# legacy components; CUDA kernels offload hot loops.  The simulator optionally
+# links OpenBLAS/LAPACK and uses MPI for multi-node runs.
+#
+# This single file configures every Aero Multi-Tool capability.  Drop any of the
+# optional sections and the tool falls back gracefully to single-machine,
+# CPU-only behaviour.
+# =============================================================================
+
+[meta]
+project_name = "AbsolutePrecisionPhysicsSim"
+target_version = "0.1.0"
+execution_mode = "strict_isolated_parametric"
+
+[graph]
+entrypoint = orchestrator
+targets = [{"name": "field_solver", "source": "src/python/field_solver.py", "output": "build_artifacts/field_solver.optimized.py"}, {"name": "integrators", "source": "src/python/integrators.py", "output": "build_artifacts/integrators.optimized.py"}]
+dependencies = {"field_solver": [], "integrators": ["field_solver"]}
+workspace_mode = incremental
+allow_partial_graph = false
+
+[compiler]
+optimization_level = "O3"
+dead_code_elimination_passes = 4
+identifier_minification = false
+strip_comments_and_dunders = false
+
+[cortex]
+target_accuracy_floor = 0.9999
+max_processing_latency_limit_us = 50000
+kinetic_stagnation_window_size = 3
+optimization_strategy_priority = "BALANCED_PRECISION_FIRST"
+
+# --- Numerical library auto-tuning ------------------------------------------
+[libraries]
+blas = "openblas"
+lapack = "openblas"
+mpi = true
+mpi_flavor = "openmpi"
+cuda = "auto"
+
+# --- Distributed compilation -------------------------------------------------
+[distributed]
+enabled = true
+worker_nodes = ["build@node01.cluster", "build@node02.cluster", "ssh://build@node03.cluster"]
+cache_sharing = "nfs"
+
+# --- GPU offloading ----------------------------------------------------------
+[gpu]
+enabled = true
+backend = "cuda"
+kernel_sources = ["src/kernels/*.cu"]
+
+# --- Physics dimensional analysis -------------------------------------------
+[physics]
+dimensions = ["length", "time", "mass", "charge", "temperature"]
+symbolic_validation = true
+
+# --- Strict floating-point control ------------------------------------------
+[precision_shield]
+floating_point_contract = "disallow"
+fast_math_override = false
+ieee_compliance = "strict"
