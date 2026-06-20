@@ -42,8 +42,8 @@ Aero Universal utilizes a lightweight **microkernel core** that manages graph sc
                                       ▼
                     ┌─────────────────────────────────────────────┐
                     │     DAG Inference Engine (orchestrator.py)  │
-                    └─────┬─────────────────┬─────────────────────┘
-                          │                 │
+                    └─────┬──────────────────┬────────────────────┘
+                          │                  │
             ┌─────────────▼─────┐  ┌─────────▼────────────┐
             │ Hardware Profiler │  │  Semantic Fluidity   │
             │ (Real-Time        │  │  (Unstructured       │
