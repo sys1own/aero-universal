@@ -20,6 +20,10 @@ _MANIFEST_PATH = os.path.join(
 )
 _REQUIRED_SECTIONS = ("graph", "compiler", "cortex")
 
+# Decomposition strategies recognised in the [scaffold] block.  The empty string
+# (default) means "no decomposition" — copy/optimize the single source entry.
+_SUPPORTED_DECOMPOSITION_MODES = frozenset({"modular_package"})
+
 # Optional sections introduced for large-scale physics simulation builds.
 # They are fully backward compatible: a blueprint that omits them behaves
 # exactly as before, falling back to the conservative defaults below.
@@ -113,6 +117,8 @@ def _default_optional_sections() -> Dict[str, Dict[str, Any]]:
             "compatibility_shims": [],
             "name": "",
             "dependencies": {},
+            "decomposition_mode": "",
+            "module_mapping": {},
         },
     }
 
@@ -564,6 +570,27 @@ def normalize_optional_sections(sections: Dict[str, Dict[str, Any]]) -> Dict[str
             )
         if "dependencies" in scaffold:
             target["dependencies"] = _as_dict("scaffold", "dependencies", scaffold["dependencies"])
+        if "decomposition_mode" in scaffold:
+            mode = str(scaffold["decomposition_mode"]).strip()
+            if mode and mode not in _SUPPORTED_DECOMPOSITION_MODES:
+                raise BlueprintParseError(
+                    "[scaffold] decomposition_mode must be one of "
+                    f"{sorted(_SUPPORTED_DECOMPOSITION_MODES)} (got {mode!r})"
+                )
+            target["decomposition_mode"] = mode
+        if "module_mapping" in scaffold:
+            raw_mapping = _as_dict("scaffold", "module_mapping", scaffold["module_mapping"])
+            mapping: Dict[str, List[str]] = {}
+            for key, value in raw_mapping.items():
+                filename = str(key).strip()
+                if not filename:
+                    raise BlueprintParseError(
+                        "[scaffold] module_mapping keys must be non-empty target filenames"
+                    )
+                mapping[filename] = _as_str_list(
+                    "scaffold", f"module_mapping.{filename}", value
+                )
+            target["module_mapping"] = mapping
 
     return normalized
 

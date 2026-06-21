@@ -101,6 +101,9 @@ class ScaffoldBuildPipeline:
         shims = list(cfg.get("compatibility_shims") or [])
         dependencies = dict(cfg.get("dependencies") or {})
         auto_layout = bool(cfg.get("auto_layout"))
+        module_mapping = dict(cfg.get("module_mapping") or {})
+        decomposition_mode = str(cfg.get("decomposition_mode", "")).strip() or None
+        modular = decomposition_mode == "modular_package" and bool(module_mapping)
 
         # Step 1 — resolve paths and route by blueprint language.
         self._step(
@@ -145,11 +148,19 @@ class ScaffoldBuildPipeline:
                 f"distribution_directory={dest}",
             )
 
-        self._step(
-            4,
-            "SYNTHESIZE FULL REPOSITORY WORKSPACE",
-            layout_description(language),
-        )
+        if modular:
+            self._step(
+                4,
+                "SYNTHESIZE FULL REPOSITORY WORKSPACE",
+                "decomposition_mode=modular_package — AST-split into "
+                f"{', '.join(sorted(module_mapping))} + __init__.py + orchestrator",
+            )
+        else:
+            self._step(
+                4,
+                "SYNTHESIZE FULL REPOSITORY WORKSPACE",
+                layout_description(language),
+            )
         if build:
             self._step(5, "EXECUTE TARGET ISOLATION BUILD", build_description(language))
         else:
@@ -167,6 +178,8 @@ class ScaffoldBuildPipeline:
                 keep=True if distribution else True,
                 context=context,
                 language=language,
+                module_mapping=module_mapping or None,
+                decomposition_mode=decomposition_mode,
             )
         except WorkspaceLocationError as exc:
             raise WorkspaceLocationError(f"Step 3 failed — {exc}") from exc
