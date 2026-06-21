@@ -404,6 +404,45 @@ Decomposition is defensive: a name that has no matching definition
 an empty mapping or an unparseable source all raise a clear `DecompositionError`
 before any file is written incorrectly.
 
+**6. Static import pruning (`analysis.static_import_pruning`).** Decomposition
+duplicates the monolith's whole top-level import block into every generated file.
+Most of those imports are dead weight in any single module. The pruner
+(`src/scaffold/import_pruner.py`) eliminates them with a pure-`ast` pass, **per
+file, before it is written to disk** — zero code bloat, no third-party deps.
+
+Enable it from the `analysis` block of `blueprint.aero`:
+
+```json
+"analysis": {
+    "ast_scanning": "aggressive",
+    "dead_code_elimination": true,
+    "static_import_pruning": true,
+    "macro_expansion": "pass_through"
+}
+```
+
+`prune_dead_imports(module_ast)` collects every name bound by `ast.Import` /
+`ast.ImportFrom` (honouring `as` aliases; `import os.path` binds `os`), walks the
+rest of the module collecting used `ast.Name` tokens, and strips any import whose
+bound name never appears. Unused aliases on a multi-name line are dropped
+individually (`from typing import Any, Dict` → `from typing import Dict`).
+
+It is deliberately conservative — it never removes an import it cannot prove dead:
+
+- `from __future__` and `*` star-imports are always kept.
+- A name that also appears as an identifier inside a **string literal** is treated
+  as used (it may be looked up dynamically) and kept.
+- If a module touches `sys.modules` / `importlib.import_module` / `__import__` /
+  `eval` / `exec` / `globals` / `vars`, pruning is **suppressed for the whole
+  module** — dynamic lookups can reference any import by string.
+
+```text
+[Optimize   ] Pruned unused 'os' import from parser.py
+[Optimize   ] parser.py: pruned 1 import(s), saved 10 byte(s)
+[Optimize   ] Pruned unused 'json' import from utils.py
+[Optimize   ] utils.py: pruned 1 import(s), saved 12 byte(s)
+```
+
 ### INI Format (Legacy)
 
 For legacy projects, the INI format is still supported. See the original [README](README_legacy.md) for details.

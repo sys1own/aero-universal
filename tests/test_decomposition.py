@@ -11,11 +11,16 @@ Layers:
 
 from __future__ import annotations
 
+import ast
 import tempfile
 import unittest
 from pathlib import Path
 
-from blueprint_parser import BlueprintParseError, normalize_optional_sections
+from blueprint_parser import (
+    BlueprintParseError,
+    normalize_analysis_block,
+    normalize_optional_sections,
+)
 from src.scaffold import ScaffoldEngine
 from src.scaffold.decomposition import (
     DecompositionError,
@@ -23,6 +28,7 @@ from src.scaffold.decomposition import (
     MissingASTNodeError,
     ModularDecomposer,
 )
+from src.scaffold.import_pruner import prune_dead_imports, render_imports
 from src.scaffold.pipeline import ScaffoldBuildPipeline
 
 MONOLITH = '''\
@@ -307,6 +313,169 @@ class TestParserModuleMapping(unittest.TestCase):
         normalized = normalize_optional_sections({})
         self.assertEqual(normalized["scaffold"]["decomposition_mode"], "")
         self.assertEqual(normalized["scaffold"]["module_mapping"], {})
+
+
+# ---------------------------------------------------------------------------
+# Static import pruning (unit)
+# ---------------------------------------------------------------------------
+
+
+class TestImportPruner(unittest.TestCase):
+    def _prune(self, src):
+        return prune_dead_imports(ast.parse(src))
+
+    def test_prunes_fully_unused_import(self):
+        out = self._prune("import os\nimport json\nx = json.dumps({})\n")
+        self.assertEqual(out.pruned, ["os"])
+        self.assertEqual(render_imports(out.kept_imports), ["import json"])
+
+    def test_prunes_unused_alias(self):
+        out = self._prune("from sys import argv, exit\nprint(argv)\n")
+        self.assertEqual(out.pruned, ["exit"])
+        self.assertEqual(render_imports(out.kept_imports), ["from sys import argv"])
+
+    def test_keeps_aliased_import_when_used(self):
+        out = self._prune("import numpy as np\ny = np.zeros(3)\n")
+        self.assertEqual(out.pruned, [])
+
+    def test_future_import_never_pruned(self):
+        out = self._prune("from __future__ import annotations\nimport os\nx = 1\n")
+        self.assertIn("from __future__ import annotations", render_imports(out.kept_imports))
+        self.assertEqual(out.pruned, ["os"])
+
+    def test_star_import_never_pruned(self):
+        out = self._prune("from os import *\nimport json\nz = getcwd()\n")
+        self.assertEqual(out.pruned, ["json"])
+        self.assertIn("from os import *", render_imports(out.kept_imports))
+
+    def test_string_literal_safeguard_keeps_import(self):
+        out = self._prune("import os\nimport json\nname = 'json'\nos.getcwd()\n")
+        self.assertEqual(out.pruned, [])
+
+    def test_sys_modules_suppresses_pruning(self):
+        out = self._prune("import os\nimport sys\nsys.modules.get('os')\n")
+        self.assertTrue(out.skipped_dynamic)
+        self.assertEqual(out.pruned, [])
+
+    def test_dunder_import_suppresses_pruning(self):
+        out = self._prune("import os\nimport json\n__import__('os')\n")
+        self.assertTrue(out.skipped_dynamic)
+
+    def test_importlib_import_module_suppresses_pruning(self):
+        out = self._prune(
+            "import importlib\nimport os\nimportlib.import_module('os')\n"
+        )
+        self.assertTrue(out.skipped_dynamic)
+
+    def test_attribute_root_counts_as_use(self):
+        out = self._prune("import os\nos.path.join('a', 'b')\n")
+        self.assertEqual(out.pruned, [])
+
+    def test_no_imports_is_noop(self):
+        out = self._prune("x = 1\n")
+        self.assertEqual(out.kept_imports, [])
+        self.assertEqual(out.pruned, [])
+
+
+# ---------------------------------------------------------------------------
+# Static import pruning (decomposer / engine integration)
+# ---------------------------------------------------------------------------
+
+
+class TestDecomposerPruning(_Tmp):
+    def test_pruning_strips_per_file_imports(self):
+        dest = self.tmp / "dist"
+        decomposer = ModularDecomposer(verbose=False, prune_imports=True)
+        decomposer.decompose(
+            MONOLITH,
+            {"parser": ["SchemaValidator", "parse_blueprint"], "shielder": ["shield"]},
+            dest_dir=dest,
+        )
+        # shielder uses os (via shield) but not json.
+        shielder = (dest / "shielder.py").read_text()
+        self.assertIn("import os", shielder)
+        self.assertNotIn("import json", shielder)
+        # parser uses json (via check) but not os.
+        parser = (dest / "parser.py").read_text()
+        self.assertIn("import json", parser)
+        self.assertNotIn("import os", parser)
+        # All generated files stay syntactically valid.
+        for name in ("parser.py", "shielder.py", "main.py"):
+            ast.parse((dest / name).read_text())
+
+    def test_pruning_disabled_keeps_all_imports(self):
+        dest = self.tmp / "dist"
+        ModularDecomposer(verbose=False, prune_imports=False).decompose(
+            MONOLITH, {"shielder": ["shield"]}, dest_dir=dest
+        )
+        shielder = (dest / "shielder.py").read_text()
+        self.assertIn("import os", shielder)
+        self.assertIn("import json", shielder)
+
+    def test_engine_emits_optimize_logs(self):
+        src = self.tmp / "main.py"
+        src.write_text(MONOLITH)
+        dist = self.tmp / "pkg"
+        msgs = []
+        ScaffoldEngine(logger=msgs.append, verbose=True).scaffold(
+            source_entry=str(src),
+            distribution_directory=dist,
+            language="python",
+            module_mapping={"parser": ["SchemaValidator", "parse_blueprint"]},
+            decomposition_mode="modular_package",
+            prune_imports=True,
+        )
+        joined = "\n".join(msgs)
+        self.assertIn("[Optimize   ] Pruned unused 'os' import from parser.py", joined)
+
+    def test_pipeline_honors_analysis_flag(self):
+        src = self.tmp / "main.py"
+        src.write_text(MONOLITH)
+        dist = self.tmp / "dist"
+        context = {
+            "frameworks": {"language": "python"},
+            "analysis": {"static_import_pruning": True},
+            "scaffold": {
+                "source_entry": str(src),
+                "distribution_directory": str(dist),
+                "decomposition_mode": "modular_package",
+                "module_mapping": {"shielder": ["shield"]},
+            },
+        }
+        ScaffoldBuildPipeline(logger=lambda _m: None, verbose=False).run(context, build=False)
+        shielder = (dist / "shielder.py").read_text()
+        self.assertNotIn("import json", shielder)
+
+
+class TestAnalysisBlockParsing(unittest.TestCase):
+    def test_flags_parsed_and_defaulted(self):
+        normalized = normalize_optional_sections(
+            {
+                "analysis": {
+                    "ast_scanning": "aggressive",
+                    "dead_code_elimination": True,
+                    "static_import_pruning": True,
+                    "macro_expansion": "pass_through",
+                }
+            }
+        )
+        analysis = normalized["analysis"]
+        self.assertTrue(analysis["static_import_pruning"])
+        self.assertTrue(analysis["dead_code_elimination"])
+        self.assertEqual(analysis["ast_scanning"], "aggressive")
+
+    def test_default_flag_is_false(self):
+        self.assertFalse(
+            normalize_optional_sections({})["analysis"]["static_import_pruning"]
+        )
+
+    def test_unknown_keys_preserved(self):
+        merged = normalize_analysis_block({"static_import_pruning": True, "knob": 7})
+        self.assertEqual(merged["knob"], 7)
+
+    def test_non_bool_flag_rejected(self):
+        with self.assertRaises(BlueprintParseError):
+            normalize_analysis_block({"static_import_pruning": "yes"})
 
 
 if __name__ == "__main__":

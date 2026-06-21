@@ -87,6 +87,7 @@ class ScaffoldEngine:
         language: Optional[str] = None,
         module_mapping: Optional[Dict[str, List[str]]] = None,
         decomposition_mode: Optional[str] = None,
+        prune_imports: bool = False,
     ) -> ScaffoldResult:
         context = context or {}
         entry = resolve_source_entry(source_entry, base_dir=base_dir)
@@ -107,6 +108,7 @@ class ScaffoldEngine:
                 module_mapping=module_mapping,
                 build=build,
                 keep=keep,
+                prune_imports=prune_imports,
             )
         if is_python(target_language):
             return self._scaffold_python(
@@ -292,6 +294,7 @@ class ScaffoldEngine:
         module_mapping: Dict[str, List[str]],
         build: bool,
         keep: Optional[bool],
+        prune_imports: bool = False,
     ) -> ScaffoldResult:
         source_text = entry.read_text()
         self._log("shield: skipped (Rust-specific shields not applied to Python targets)")
@@ -302,8 +305,12 @@ class ScaffoldEngine:
             f"workspace: {workspace.root}  "
             f"({'temporary, auto-cleaned' if workspace.is_temporary else 'distribution directory'})"
         )
+        if prune_imports:
+            self._log("optimize: static import pruning enabled (analysis.static_import_pruning)")
 
-        decomposer = ModularDecomposer(logger=self._logger, verbose=self.verbose)
+        decomposer = ModularDecomposer(
+            logger=self._logger, verbose=self.verbose, prune_imports=prune_imports
+        )
         decomposition: DecompositionResult = decomposer.decompose(
             source_text,
             module_mapping,
