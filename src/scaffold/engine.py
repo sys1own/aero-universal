@@ -14,11 +14,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from src.scaffold.decomposition import DecompositionResult, ModularDecomposer
 from src.scaffold.language_router import is_python, resolve_target_language
 from src.scaffold.python_repo_generator import (
     PythonGeneratedRepo,
     build_python_spec,
     generate_python_repo,
+    infer_import_dependencies,
 )
 from src.scaffold.python_validator import PythonValidationRunner
 from src.scaffold.recovery import DiagnosticRecoveryRunner, RecoveryResult
@@ -83,6 +85,8 @@ class ScaffoldEngine:
         *,
         context: Optional[Dict[str, Any]] = None,
         language: Optional[str] = None,
+        module_mapping: Optional[Dict[str, List[str]]] = None,
+        decomposition_mode: Optional[str] = None,
     ) -> ScaffoldResult:
         context = context or {}
         entry = resolve_source_entry(source_entry, base_dir=base_dir)
@@ -93,6 +97,17 @@ class ScaffoldEngine:
         )
         self._log(f"resolved source_entry -> {entry.path}  (language: {entry.language})")
 
+        if is_python(target_language) and decomposition_mode == "modular_package" and module_mapping:
+            self._log("decomposition router -> 'modular_package' (AST node extraction)")
+            return self._scaffold_python_modular(
+                entry=entry,
+                name=name,
+                distribution_directory=distribution_directory,
+                dependencies=dependencies,
+                module_mapping=module_mapping,
+                build=build,
+                keep=keep,
+            )
         if is_python(target_language):
             return self._scaffold_python(
                 entry=entry,
@@ -260,6 +275,82 @@ class ScaffoldEngine:
         return ScaffoldResult(
             source=entry.to_dict(),
             repo=repo.to_dict(),
+            shield={"anchors": [], "applied": [], "changed": False, "skipped": "python-target"},
+            workspace=str(workspace.root),
+            out_of_tree=True,
+            language="python",
+            build=build_info,
+        )
+
+    def _scaffold_python_modular(
+        self,
+        *,
+        entry: SourceEntry,
+        name: Optional[str],
+        distribution_directory: Optional[Path],
+        dependencies: Optional[Dict[str, Any]],
+        module_mapping: Dict[str, List[str]],
+        build: bool,
+        keep: Optional[bool],
+    ) -> ScaffoldResult:
+        source_text = entry.read_text()
+        self._log("shield: skipped (Rust-specific shields not applied to Python targets)")
+
+        workspace = OutOfTreeWorkspace(distribution_directory=distribution_directory, keep=keep)
+        workspace.create()
+        self._log(
+            f"workspace: {workspace.root}  "
+            f"({'temporary, auto-cleaned' if workspace.is_temporary else 'distribution directory'})"
+        )
+
+        decomposer = ModularDecomposer(logger=self._logger, verbose=self.verbose)
+        decomposition: DecompositionResult = decomposer.decompose(
+            source_text,
+            module_mapping,
+            source_filename=entry.name,
+            dest_dir=workspace.root,
+        )
+        for written in decomposition.files:
+            self._log(f"  + {written}")
+
+        dep_overrides: Optional[List[str]] = None
+        if dependencies:
+            dep_overrides = [str(v) for v in dependencies.values()]
+        deps = infer_import_dependencies(source_text, dep_overrides)
+
+        spec = {
+            "name": name or entry.stem,
+            "version": "0.1.0",
+            "entry_filename": decomposition.orchestrator,
+            "dependencies": deps,
+            "language": "python",
+            "decomposition_mode": "modular_package",
+        }
+        repo: Dict[str, Any] = {
+            "root": str(workspace.root),
+            "files": list(decomposition.files),
+            "spec": spec,
+            "language": "python",
+            "decomposition": decomposition.to_dict(),
+        }
+
+        build_info: Optional[Dict[str, Any]] = None
+        if build:
+            self._log(
+                f"validate: python bytecode check (cwd={workspace.root}); cargo skipped"
+            )
+            result = self._python_validator.validate_workspace(workspace.root)
+            attempt = result.attempts[0] if result.attempts else None
+            if attempt and attempt.succeeded:
+                self._log("validate: compileall/py_compile ok")
+            elif attempt:
+                for err in attempt.errors:
+                    self._log(f"validate: {err}")
+            build_info = result.to_dict()
+
+        return ScaffoldResult(
+            source=entry.to_dict(),
+            repo=repo,
             shield={"anchors": [], "applied": [], "changed": False, "skipped": "python-target"},
             workspace=str(workspace.root),
             out_of_tree=True,

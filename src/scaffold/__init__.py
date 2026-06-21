@@ -16,6 +16,14 @@ Typical use::
     result = engine.scaffold("/content/lib.rs", distribution_directory="~/out/anyon")
 """
 
+from src.scaffold.decomposition import (
+    DecomposedModule,
+    DecompositionError,
+    DecompositionResult,
+    ImportCollisionError,
+    MissingASTNodeError,
+    ModularDecomposer,
+)
 from src.scaffold.engine import ScaffoldEngine, ScaffoldResult
 from src.scaffold.language_router import resolve_target_language
 from src.scaffold.pipeline import (
@@ -65,6 +73,12 @@ __all__ = [
     "resolve_source_entry",
     "DiagnosticRecoveryRunner",
     "RecoveryResult",
+    "ModularDecomposer",
+    "DecompositionResult",
+    "DecomposedModule",
+    "DecompositionError",
+    "MissingASTNodeError",
+    "ImportCollisionError",
 ]
 
 __version__ = "1.0.0"

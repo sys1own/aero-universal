@@ -360,6 +360,50 @@ The subsystem is fully modular — `source_resolver`, `rust_shield`, `workspace`
 `repo_generator`, `recovery` and the orchestrating `engine` are independently
 usable and tested.
 
+**5. Modular decomposition (`decomposition_mode = "modular_package"`).** Instead
+of copying a single Python entry script verbatim, Aero can read a *monolithic*
+script (e.g. our own `main.py`) and break it apart into a multi‑file, highly
+decoupled package — driven entirely by AST analysis. Declare a `module_mapping`
+inside the `[scaffold]` block whose keys are target filenames and whose values
+are the class/function names that should live in each file:
+
+```ini
+[scaffold]
+source_entry        = "main.py"
+distribution_directory = "~/out/aero_pkg"
+decomposition_mode  = "modular_package"
+module_mapping      = {
+    "parser":   ["SchemaValidator", "parse_blueprint"],
+    "cli":      ["main", "create_parser"],
+    "shielder": ["RustSemanticShield"]
+}
+```
+
+The `ModularDecomposer` (`src/scaffold/decomposition.py`) then:
+
+- **Extracts** every mapped top‑level `class` / `def` / `async def` (decorators
+  included) from the `source_entry` via `ast`, preserving source order.
+- **Duplicates global imports** (`import os`, `import json`, `from __future__ …`)
+  to the top of every generated module so the decoupled files never break on a
+  missing dependency.
+- **Synthesises the package**: writes each mapped file (`parser.py`, `cli.py`,
+  `shielder.py`), an empty `__init__.py` to make the directory an importable
+  package, and rewrites the root `main.py` into a thin orchestrator that pulls
+  the moved symbols back via package‑relative imports
+  (`from .parser import SchemaValidator`).
+
+```text
+[Decomposing] Extracted class 'SchemaValidator' -> ~/out/aero_pkg/parser.py
+[Decomposing] Extracted function 'parse_blueprint' -> ~/out/aero_pkg/parser.py
+[Scaffold   ] Initialized package boundary __init__.py
+[Scaffold   ] Rewrote orchestrator entrypoint ~/out/aero_pkg/main.py
+```
+
+Decomposition is defensive: a name that has no matching definition
+(`MissingASTNodeError`), a symbol mapped to two files (`ImportCollisionError`),
+an empty mapping or an unparseable source all raise a clear `DecompositionError`
+before any file is written incorrectly.
+
 ### INI Format (Legacy)
 
 For legacy projects, the INI format is still supported. See the original [README](README_legacy.md) for details.
