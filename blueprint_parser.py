@@ -118,6 +118,7 @@ def _default_optional_sections() -> Dict[str, Dict[str, Any]]:
             "test_cases": [],
             "execution_command": "",
             "validation_required": True,
+            "generate_test_shims": False,
         },
         "context": {"sources": []},
         "scaffold": {
@@ -567,6 +568,10 @@ def normalize_optional_sections(sections: Dict[str, Dict[str, Any]]) -> Dict[str
             target["execution_command"] = str(validation["execution_command"])
         if "validation_required" in validation:
             target["validation_required"] = _as_bool("validation", "validation_required", validation["validation_required"])
+        if "generate_test_shims" in validation:
+            target["generate_test_shims"] = _as_bool(
+                "validation", "generate_test_shims", validation["generate_test_shims"]
+            )
 
     # --- [context] ---------------------------------------------------
     context = sections.get("context")
@@ -594,7 +599,13 @@ def normalize_optional_sections(sections: Dict[str, Dict[str, Any]]) -> Dict[str
     if isinstance(scaffold, dict):
         target = normalized["scaffold"]
         if "source_entry" in scaffold:
-            target["source_entry"] = str(scaffold["source_entry"]).strip()
+            # Multi-file ingestion matrix: a single path string OR a list/array
+            # of absolute paths to be merged before decomposition.
+            raw_entry = scaffold["source_entry"]
+            if isinstance(raw_entry, (list, tuple)):
+                target["source_entry"] = [str(p).strip() for p in raw_entry if str(p).strip()]
+            else:
+                target["source_entry"] = str(raw_entry).strip()
         if "auto_layout" in scaffold:
             target["auto_layout"] = _as_bool("scaffold", "auto_layout", scaffold["auto_layout"])
         if "distribution_directory" in scaffold:

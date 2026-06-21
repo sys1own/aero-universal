@@ -12,9 +12,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 
-from src.scaffold.decomposition import DecompositionResult, ModularDecomposer
+from src.scaffold.decomposition import (
+    DecompositionResult,
+    ModularDecomposer,
+    merge_source_asts,
+)
 from src.scaffold.language_router import is_python, resolve_target_language
 from src.scaffold.python_repo_generator import (
     PythonGeneratedRepo,
@@ -26,7 +30,13 @@ from src.scaffold.python_validator import PythonValidationRunner
 from src.scaffold.recovery import DiagnosticRecoveryRunner, RecoveryResult
 from src.scaffold.repo_generator import GeneratedRepo, build_spec, generate_repo
 from src.scaffold.rust_shield import RustSemanticShield, ShieldReport
-from src.scaffold.source_resolver import SourceEntry, copy_into_workspace, resolve_source_entry
+from src.scaffold.source_resolver import (
+    SourceEntry,
+    SourceEntryNotFound,
+    copy_into_workspace,
+    resolve_source_entry,
+)
+from src.scaffold.test_matrix import generate_test_matrix
 from src.scaffold.workspace import OutOfTreeWorkspace
 
 Logger = Callable[[str], None]
@@ -74,7 +84,7 @@ class ScaffoldEngine:
 
     def scaffold(
         self,
-        source_entry: str,
+        source_entry: Union[str, List[str]],
         name: Optional[str] = None,
         base_dir: Optional[Path] = None,
         distribution_directory: Optional[Path] = None,
@@ -88,10 +98,24 @@ class ScaffoldEngine:
         module_mapping: Optional[Dict[str, List[str]]] = None,
         decomposition_mode: Optional[str] = None,
         prune_imports: bool = False,
+        generate_tests: bool = False,
     ) -> ScaffoldResult:
         context = context or {}
-        entry = resolve_source_entry(source_entry, base_dir=base_dir)
+
+        # Multi-file source ingestion matrix: a single path or a list of paths.
+        raw_entries = source_entry if isinstance(source_entry, (list, tuple)) else [source_entry]
+        raw_entries = [str(p).strip() for p in raw_entries if str(p).strip()]
+        if not raw_entries:
+            raise SourceEntryNotFound("no source_entry path(s) provided")
+        entries = [resolve_source_entry(p, base_dir=base_dir) for p in raw_entries]
+        entry = entries[0]
+
         target_language = language or resolve_target_language(context, source_entry=entry)
+        if len(entries) > 1:
+            self._log(
+                f"ingest matrix -> {len(entries)} source files: "
+                f"{', '.join(e.path.name for e in entries)}"
+            )
         self._log(
             f"language router -> {target_language!r}  "
             f"(source={entry.path.name}, resolved={entry.language})"
@@ -101,7 +125,7 @@ class ScaffoldEngine:
         if is_python(target_language) and decomposition_mode == "modular_package" and module_mapping:
             self._log("decomposition router -> 'modular_package' (AST node extraction)")
             return self._scaffold_python_modular(
-                entry=entry,
+                entries=entries,
                 name=name,
                 distribution_directory=distribution_directory,
                 dependencies=dependencies,
@@ -109,6 +133,12 @@ class ScaffoldEngine:
                 build=build,
                 keep=keep,
                 prune_imports=prune_imports,
+                generate_tests=generate_tests,
+            )
+        if len(entries) > 1:
+            self._log(
+                "ingest matrix: multiple files only merge for the python "
+                "'modular_package' path; using the first entry for this target"
             )
         if is_python(target_language):
             return self._scaffold_python(
@@ -118,6 +148,7 @@ class ScaffoldEngine:
                 dependencies=dependencies,
                 build=build,
                 keep=keep,
+                generate_tests=generate_tests,
             )
         return self._scaffold_rust(
             entry=entry,
@@ -127,6 +158,7 @@ class ScaffoldEngine:
             compatibility_shims=compatibility_shims,
             build=build,
             keep=keep,
+            generate_tests=generate_tests,
         )
 
     # ------------------------------------------------------------------
@@ -143,6 +175,7 @@ class ScaffoldEngine:
         compatibility_shims: Optional[List[str]],
         build: bool,
         keep: Optional[bool],
+        generate_tests: bool = False,
     ) -> ScaffoldResult:
         source_text = entry.read_text()
         shield_report = self._shield_rust(entry, source_text, compatibility_shims=compatibility_shims)
@@ -164,6 +197,15 @@ class ScaffoldEngine:
             self._log(f"  + {written}")
         copy_into_workspace(entry, workspace.root / "src" / "lib.rs", content=spec.source)
 
+        repo_dict = repo.to_dict()
+        if generate_tests:
+            matrix = generate_test_matrix(
+                "rust", workspace.root, crate=spec.name, logger=self._logger if self.verbose else None
+            )
+            repo_dict.setdefault("files", [])
+            repo_dict["files"] = list(repo_dict["files"]) + matrix.files
+            repo_dict["test_matrix"] = matrix.to_dict()
+
         build_info: Optional[Dict[str, Any]] = None
         if build:
             build_info = self._build_rust_with_recovery(repo).to_dict()
@@ -171,7 +213,7 @@ class ScaffoldEngine:
 
         return ScaffoldResult(
             source=entry.to_dict(),
-            repo=repo.to_dict(),
+            repo=repo_dict,
             shield=shield_report.to_dict(),
             workspace=str(workspace.root),
             out_of_tree=True,
@@ -241,6 +283,7 @@ class ScaffoldEngine:
         dependencies: Optional[Dict[str, Any]],
         build: bool,
         keep: Optional[bool],
+        generate_tests: bool = False,
     ) -> ScaffoldResult:
         source_text = entry.read_text()
         self._log("shield: skipped (Rust-specific shields not applied to Python targets)")
@@ -270,13 +313,27 @@ class ScaffoldEngine:
         for written in repo.files:
             self._log(f"  + {written}")
 
+        repo_dict = repo.to_dict()
+        if generate_tests:
+            module = spec.entry_filename
+            module = module[:-3] if module.endswith(".py") else module
+            matrix = generate_test_matrix(
+                "python",
+                workspace.root,
+                package="",
+                modules=[module],
+                logger=self._logger if self.verbose else None,
+            )
+            repo_dict["files"] = list(repo_dict.get("files", [])) + matrix.files
+            repo_dict["test_matrix"] = matrix.to_dict()
+
         build_info: Optional[Dict[str, Any]] = None
         if build:
             build_info = self._validate_python(repo).to_dict()
 
         return ScaffoldResult(
             source=entry.to_dict(),
-            repo=repo.to_dict(),
+            repo=repo_dict,
             shield={"anchors": [], "applied": [], "changed": False, "skipped": "python-target"},
             workspace=str(workspace.root),
             out_of_tree=True,
@@ -287,7 +344,7 @@ class ScaffoldEngine:
     def _scaffold_python_modular(
         self,
         *,
-        entry: SourceEntry,
+        entries: List[SourceEntry],
         name: Optional[str],
         distribution_directory: Optional[Path],
         dependencies: Optional[Dict[str, Any]],
@@ -295,9 +352,26 @@ class ScaffoldEngine:
         build: bool,
         keep: Optional[bool],
         prune_imports: bool = False,
+        generate_tests: bool = False,
     ) -> ScaffoldResult:
-        source_text = entry.read_text()
+        entry = entries[0]
         self._log("shield: skipped (Rust-specific shields not applied to Python targets)")
+
+        # Multi-file ingestion matrix: merge several ASTs into one schema first.
+        if len(entries) > 1:
+            merged = merge_source_asts(
+                [(e.path.name, e.read_text()) for e in entries],
+                logger=self._logger if self.verbose else None,
+            )
+            source_text = merged.source
+            orchestrator_name = "main.py"
+            self._log(
+                f"ingest matrix: merged {len(entries)} files -> "
+                f"{len(merged.definitions)} top-level definition(s)"
+            )
+        else:
+            source_text = entry.read_text()
+            orchestrator_name = entry.name
 
         workspace = OutOfTreeWorkspace(distribution_directory=distribution_directory, keep=keep)
         workspace.create()
@@ -314,11 +388,21 @@ class ScaffoldEngine:
         decomposition: DecompositionResult = decomposer.decompose(
             source_text,
             module_mapping,
-            source_filename=entry.name,
+            source_filename=orchestrator_name,
             dest_dir=workspace.root,
         )
         for written in decomposition.files:
             self._log(f"  + {written}")
+
+        if generate_tests:
+            matrix = generate_test_matrix(
+                "python",
+                workspace.root,
+                package="",
+                modules=[m.filename for m in decomposition.modules],
+                logger=self._logger if self.verbose else None,
+            )
+            decomposition.files.extend(matrix.files)
 
         dep_overrides: Optional[List[str]] = None
         if dependencies:

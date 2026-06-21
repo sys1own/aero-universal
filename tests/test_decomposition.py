@@ -28,8 +28,10 @@ from src.scaffold.decomposition import (
     MissingASTNodeError,
     ModularDecomposer,
 )
+from src.scaffold.decomposition import merge_source_asts, resolve_cross_imports
 from src.scaffold.import_pruner import prune_dead_imports, render_imports
 from src.scaffold.pipeline import ScaffoldBuildPipeline
+from src.scaffold.test_matrix import generate_test_matrix
 
 MONOLITH = '''\
 # -*- coding: utf-8 -*-
@@ -476,6 +478,181 @@ class TestAnalysisBlockParsing(unittest.TestCase):
     def test_non_bool_flag_rejected(self):
         with self.assertRaises(BlueprintParseError):
             normalize_analysis_block({"static_import_pruning": "yes"})
+
+
+# ---------------------------------------------------------------------------
+# Feature A — intra-module interlinking (cross-module calls)
+# ---------------------------------------------------------------------------
+
+
+class TestCrossImports(unittest.TestCase):
+    def test_resolve_cross_imports_basic(self):
+        body = "def main():\n    return BlueprintParser()\n"
+        sym = {"BlueprintParser": "parser.py", "main": "cli.py"}
+        lines, pairs = resolve_cross_imports(body, "cli.py", sym)
+        self.assertEqual(lines, ["from .parser import BlueprintParser"])
+        self.assertEqual(pairs, [("BlueprintParser", "parser")])
+
+    def test_no_self_import(self):
+        body = "class A:\n    def m(self):\n        return A()\n"
+        sym = {"A": "parser.py"}
+        lines, pairs = resolve_cross_imports(body, "parser.py", sym)
+        self.assertEqual(lines, [])
+        self.assertEqual(pairs, [])
+
+    def test_groups_multiple_symbols_per_module(self):
+        body = "def f():\n    return X() + Y()\n"
+        sym = {"X": "core.py", "Y": "core.py", "f": "cli.py"}
+        lines, _ = resolve_cross_imports(body, "cli.py", sym)
+        self.assertEqual(lines, ["from .core import X, Y"])
+
+    def test_decomposer_injects_cross_import(self):
+        src = (
+            "class BlueprintParser:\n    pass\n"
+            "def main():\n    return BlueprintParser()\n"
+        )
+        dest = Path(tempfile.mkdtemp())
+        ModularDecomposer(verbose=False).decompose(
+            src,
+            {"parser": ["BlueprintParser"], "cli": ["main"]},
+            dest_dir=dest,
+        )
+        cli = (dest / "cli.py").read_text()
+        self.assertIn("from .parser import BlueprintParser", cli)
+        # parser.py does not import itself.
+        self.assertNotIn("from .parser import", (dest / "parser.py").read_text())
+
+
+# ---------------------------------------------------------------------------
+# Feature B — multi-file source ingestion matrix
+# ---------------------------------------------------------------------------
+
+
+class TestMergeSourceAsts(unittest.TestCase):
+    def test_merges_and_dedups_imports(self):
+        a = "import os\nimport json\ndef f():\n    return os.getcwd()\n"
+        b = "import os\nimport sys\ndef g():\n    return sys.argv\n"
+        merged = merge_source_asts([("a.py", a), ("b.py", b)])
+        # os appears once despite being in both files.
+        self.assertEqual(merged.source.count("import os"), 1)
+        self.assertIn("import json", merged.source)
+        self.assertIn("import sys", merged.source)
+        self.assertIn("f", merged.definitions)
+        self.assertIn("g", merged.definitions)
+        ast.parse(merged.source)  # merged result is valid
+
+    def test_future_import_hoisted_first(self):
+        a = "from __future__ import annotations\nimport os\nx = 1\n"
+        b = "import sys\ny = 2\n"
+        merged = merge_source_asts([("a.py", a), ("b.py", b)])
+        self.assertTrue(merged.source.lstrip().startswith("from __future__"))
+
+    def test_bad_source_raises(self):
+        with self.assertRaises(DecompositionError):
+            merge_source_asts([("bad.py", "def (:\n")])
+
+    def test_engine_multifile_decomposition(self):
+        tmp = Path(tempfile.mkdtemp())
+        (tmp / "core.py").write_text("class A:\n    pass\n")
+        (tmp / "extra.py").write_text("def helper():\n    return A()\n")
+        dist = tmp / "dist"
+        ScaffoldEngine(verbose=False).scaffold(
+            source_entry=[str(tmp / "core.py"), str(tmp / "extra.py")],
+            distribution_directory=dist,
+            language="python",
+            module_mapping={"parser": ["A"], "utils": ["helper"]},
+            decomposition_mode="modular_package",
+        )
+        self.assertTrue((dist / "parser.py").exists())
+        self.assertTrue((dist / "utils.py").exists())
+        # cross-module reference resolved across merged files.
+        self.assertIn("from .parser import A", (dist / "utils.py").read_text())
+        # multi-file orchestrator is named main.py
+        self.assertTrue((dist / "main.py").exists())
+
+
+# ---------------------------------------------------------------------------
+# Feature C — autonomous self-testing suite scaffolding
+# ---------------------------------------------------------------------------
+
+
+class TestTestMatrix(_Tmp):
+    def test_python_matrix_imports_submodules(self):
+        result = generate_test_matrix(
+            "python", self.tmp, package="", modules=["parser.py", "cli.py"]
+        )
+        self.assertEqual(result.files, ["tests/test_package_loading.py"])
+        content = (self.tmp / "tests" / "test_package_loading.py").read_text()
+        self.assertIn("'parser'", content)
+        self.assertIn("'cli'", content)
+        self.assertIn("importlib.import_module", content)
+        ast.parse(content)
+
+    def test_rust_matrix_writes_binding_test(self):
+        result = generate_test_matrix("rust", self.tmp, crate="anyon-sim")
+        self.assertEqual(result.files, ["tests/binding_validation.rs"])
+        content = (self.tmp / "tests" / "binding_validation.rs").read_text()
+        self.assertIn("#[test]", content)
+        self.assertIn("binding_validation", content)
+
+    def test_engine_generates_tests_for_modular(self):
+        src = self.tmp / "main.py"
+        src.write_text(MONOLITH)
+        dist = self.tmp / "pkg"
+        ScaffoldEngine(verbose=False).scaffold(
+            source_entry=str(src),
+            distribution_directory=dist,
+            language="python",
+            module_mapping={"parser": ["SchemaValidator"]},
+            decomposition_mode="modular_package",
+            generate_tests=True,
+        )
+        loader = dist / "tests" / "test_package_loading.py"
+        self.assertTrue(loader.exists())
+        self.assertIn("'parser'", loader.read_text())
+
+    def test_pipeline_honors_generate_test_shims(self):
+        src = self.tmp / "main.py"
+        src.write_text(MONOLITH)
+        dist = self.tmp / "dist"
+        context = {
+            "frameworks": {"language": "python"},
+            "validation": {"generate_test_shims": True},
+            "scaffold": {
+                "source_entry": str(src),
+                "distribution_directory": str(dist),
+                "decomposition_mode": "modular_package",
+                "module_mapping": {"parser": ["SchemaValidator"]},
+            },
+        }
+        ScaffoldBuildPipeline(logger=lambda _m: None, verbose=False).run(context, build=False)
+        self.assertTrue((dist / "tests" / "test_package_loading.py").exists())
+
+
+class TestMultiFileAndShimParsing(unittest.TestCase):
+    def test_source_entry_list_parsed(self):
+        normalized = normalize_optional_sections(
+            {"scaffold": {"source_entry": ["/a/core.py", "/b/utils.py"]}}
+        )
+        self.assertEqual(
+            normalized["scaffold"]["source_entry"], ["/a/core.py", "/b/utils.py"]
+        )
+
+    def test_source_entry_string_still_supported(self):
+        normalized = normalize_optional_sections(
+            {"scaffold": {"source_entry": "/a/main.py"}}
+        )
+        self.assertEqual(normalized["scaffold"]["source_entry"], "/a/main.py")
+
+    def test_generate_test_shims_flag_parsed(self):
+        normalized = normalize_optional_sections(
+            {"validation": {"generate_test_shims": True}}
+        )
+        self.assertTrue(normalized["validation"]["generate_test_shims"])
+
+    def test_generate_test_shims_defaults_false(self):
+        normalized = normalize_optional_sections({})
+        self.assertFalse(normalized["validation"]["generate_test_shims"])
 
 
 if __name__ == "__main__":

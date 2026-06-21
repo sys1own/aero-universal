@@ -443,6 +443,54 @@ It is deliberately conservative — it never removes an import it cannot prove d
 [Optimize   ] utils.py: pruned 1 import(s), saved 12 byte(s)
 ```
 
+**7. Intra-module interlinking (cross-module calls).** When the monolith is split,
+code in `cli.py` may call a class that was moved to `parser.py` — a latent
+`NameError`. `resolve_cross_imports()` walks each generated module's body, and for
+every referenced symbol that now lives in a *sibling* module it injects a clean
+relative import at the top of the file. The injected lines are real usages, so the
+import pruner never strips them.
+
+```text
+[Interlink  ] cli.py: injected 'from .parser import BlueprintParser'
+```
+
+**8. Multi-file source ingestion matrix.** Both `scaffold.source_entry` (and
+`context.source_entry`) accept either a single absolute path **or a list** of
+paths. When a list is given, `merge_source_asts()` parses and merges every file's
+AST in-memory — hoisting and de-duplicating imports (`from __future__` first) and
+concatenating the remaining bodies under provenance banners — into a single
+structural schema *before* the `modular_package` cuts run. The merged orchestrator
+is emitted as `main.py`.
+
+```json
+"scaffold": {
+    "source_entry": ["/content/core.py", "/content/utils.py"],
+    "decomposition_mode": "modular_package",
+    "module_mapping": { "parser": ["BlueprintParser"], "cli": ["main"] }
+}
+```
+
+```text
+[Ingest     ] Merged AST from core.py (1 top-level def(s))
+[Ingest     ] Merged AST from utils.py (2 top-level def(s))
+```
+
+**9. Autonomous self-testing suite scaffolding (`validation.generate_test_shims`).**
+When enabled, `generate_test_matrix()` writes an independent `tests/` directory
+into the distribution root so the generated repo is provably operational:
+
+- **Python** → `tests/test_package_loading.py` — resolves its own package from
+  `__file__` and imports every generated submodule through the `__init__.py`
+  gateway, catching and reporting any import-time failure. Runs both as
+  `python -m <pkg>.tests.test_package_loading` and as a plain script.
+- **Rust** → `tests/binding_validation.rs` — a standard `#[cfg(test)]` integration
+  loop confirming the crate links and loads.
+
+```text
+[TestMatrix ] Provisioned self-test folder ~/out/aero_pkg/tests
+[TestMatrix ] Wrote tests/test_package_loading.py (verifies 2 submodule import(s))
+```
+
 ### INI Format (Legacy)
 
 For legacy projects, the INI format is still supported. See the original [README](README_legacy.md) for details.

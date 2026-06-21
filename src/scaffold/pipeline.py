@@ -58,7 +58,12 @@ def scaffold_config_from_context(context: Dict[str, Any]) -> Dict[str, Any]:
 def should_run_scaffold_pipeline(context: Dict[str, Any]) -> bool:
     """True when the blueprint requests out-of-tree scaffold layout/build."""
     cfg = scaffold_config_from_context(context)
-    return bool(cfg.get("auto_layout")) or bool(str(cfg.get("source_entry", "")).strip())
+    entry = cfg.get("source_entry", "")
+    if isinstance(entry, (list, tuple)):
+        has_entry = any(str(p).strip() for p in entry)
+    else:
+        has_entry = bool(str(entry).strip())
+    return bool(cfg.get("auto_layout")) or has_entry
 
 
 class ScaffoldBuildPipeline:
@@ -89,12 +94,19 @@ class ScaffoldBuildPipeline:
         build: bool = True,
     ) -> PipelineResult:
         cfg = scaffold_config_from_context(context)
-        source_entry = str(cfg.get("source_entry", "")).strip()
-        if not source_entry:
+        # Multi-file source ingestion matrix: accept a single path or a list.
+        raw_source_entry = cfg.get("source_entry", "")
+        if isinstance(raw_source_entry, (list, tuple)):
+            source_entries = [str(p).strip() for p in raw_source_entry if str(p).strip()]
+        else:
+            single = str(raw_source_entry).strip()
+            source_entries = [single] if single else []
+        if not source_entries:
             raise ValueError(
                 "scaffold.source_entry is required when auto_layout is enabled "
                 "or when running the isolated scaffold build pipeline"
             )
+        source_entry: Any = source_entries if len(source_entries) > 1 else source_entries[0]
 
         distribution = str(cfg.get("distribution_directory", "")).strip() or None
         name = str(cfg.get("name", "")).strip() or None
@@ -106,6 +118,8 @@ class ScaffoldBuildPipeline:
         modular = decomposition_mode == "modular_package" and bool(module_mapping)
         analysis = context.get("analysis") if isinstance(context.get("analysis"), dict) else {}
         prune_imports = bool(analysis.get("static_import_pruning"))
+        validation = context.get("validation") if isinstance(context.get("validation"), dict) else {}
+        generate_tests = bool(validation.get("generate_test_shims"))
 
         # Step 1 — resolve paths and route by blueprint language.
         self._step(
@@ -114,7 +128,9 @@ class ScaffoldBuildPipeline:
             f"source_entry={source_entry!r}",
         )
         try:
-            entry = resolve_source_entry(source_entry, base_dir=blueprint_dir)
+            entry = resolve_source_entry(source_entries[0], base_dir=blueprint_dir)
+            for extra in source_entries[1:]:
+                resolve_source_entry(extra, base_dir=blueprint_dir)
         except SourceEntryNotFound as exc:
             raise SourceEntryNotFound(f"Step 1 failed — {exc}") from exc
 
@@ -150,6 +166,7 @@ class ScaffoldBuildPipeline:
                 f"distribution_directory={dest}",
             )
 
+        test_note = " + tests/ self-test matrix" if generate_tests else ""
         if modular:
             prune_note = " + static import pruning" if prune_imports else ""
             self._step(
@@ -157,13 +174,13 @@ class ScaffoldBuildPipeline:
                 "SYNTHESIZE FULL REPOSITORY WORKSPACE",
                 "decomposition_mode=modular_package — AST-split into "
                 f"{', '.join(sorted(module_mapping))} + __init__.py + orchestrator"
-                f"{prune_note}",
+                f"{prune_note}{test_note}",
             )
         else:
             self._step(
                 4,
                 "SYNTHESIZE FULL REPOSITORY WORKSPACE",
-                layout_description(language),
+                layout_description(language) + test_note,
             )
         if build:
             self._step(5, "EXECUTE TARGET ISOLATION BUILD", build_description(language))
@@ -185,6 +202,7 @@ class ScaffoldBuildPipeline:
                 module_mapping=module_mapping or None,
                 decomposition_mode=decomposition_mode,
                 prune_imports=prune_imports,
+                generate_tests=generate_tests,
             )
         except WorkspaceLocationError as exc:
             raise WorkspaceLocationError(f"Step 3 failed — {exc}") from exc

@@ -21,9 +21,13 @@ from src.scaffold.decomposition import (
     DecompositionError,
     DecompositionResult,
     ImportCollisionError,
+    MergedSource,
     MissingASTNodeError,
     ModularDecomposer,
+    merge_source_asts,
+    resolve_cross_imports,
 )
+from src.scaffold.test_matrix import TestMatrixResult, generate_test_matrix
 from src.scaffold.engine import ScaffoldEngine, ScaffoldResult
 from src.scaffold.import_pruner import PruneOutcome, prune_dead_imports, render_imports
 from src.scaffold.language_router import resolve_target_language
@@ -83,6 +87,11 @@ __all__ = [
     "prune_dead_imports",
     "render_imports",
     "PruneOutcome",
+    "merge_source_asts",
+    "resolve_cross_imports",
+    "MergedSource",
+    "generate_test_matrix",
+    "TestMatrixResult",
 ]
 
 __version__ = "1.0.0"
