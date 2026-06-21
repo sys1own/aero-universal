@@ -69,6 +69,7 @@ class DecomposedModule:
     classes: List[str] = field(default_factory=list)
     functions: List[str] = field(default_factory=list)
     source: str = ""
+    cross_imports: List[str] = field(default_factory=list)
 
     @property
     def module_name(self) -> str:
@@ -84,6 +85,7 @@ class DecomposedModule:
             "module": self.module_name,
             "classes": list(self.classes),
             "functions": list(self.functions),
+            "cross_imports": list(self.cross_imports),
         }
 
 
@@ -108,6 +110,128 @@ class DecompositionResult:
             "package_init": self.package_init,
             "mode": "modular_package",
         }
+
+
+@dataclass
+class MergedSource:
+    """The in-memory result of merging several source files' ASTs."""
+
+    source: str
+    files: List[str] = field(default_factory=list)
+    definitions: List[str] = field(default_factory=list)
+
+
+def _strip_top_level_imports(text: str, tree: ast.Module) -> str:
+    """Return ``text`` with its top-level import statements removed."""
+    drop: set = set()
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            start = node.lineno
+            end = getattr(node, "end_lineno", None) or node.lineno
+            drop.update(range(start, end + 1))
+    lines = text.splitlines(keepends=True)
+    return "".join(line for idx, line in enumerate(lines, start=1) if idx not in drop)
+
+
+def merge_source_asts(
+    sources: List[Tuple[str, str]],
+    logger: Optional[Logger] = None,
+) -> MergedSource:
+    """Merge multiple Python source files into a single structural schema.
+
+    Hoists and de-duplicates every top-level import (``from __future__`` first),
+    then concatenates each file's remaining top-level body under a provenance
+    banner.  The merged source has consistent line numbering so downstream
+    ``ast.get_source_segment`` extraction keeps working.
+    """
+    future_lines: List[str] = []
+    import_lines: List[str] = []
+    seen_imports: set = set()
+    body_chunks: List[str] = []
+    merged_files: List[str] = []
+    definitions: List[str] = []
+
+    for label, text in sources:
+        try:
+            tree = ast.parse(text)
+        except SyntaxError as exc:
+            raise DecompositionError(
+                f"cannot parse source '{label}' for AST merge: "
+                f"{exc.msg} (line {exc.lineno})"
+            ) from exc
+
+        for node in tree.body:
+            if isinstance(node, (ast.Import, ast.ImportFrom)):
+                segment = (ast.get_source_segment(text, node) or "").strip()
+                if not segment or segment in seen_imports:
+                    continue
+                seen_imports.add(segment)
+                if isinstance(node, ast.ImportFrom) and node.module == "__future__":
+                    future_lines.append(segment)
+                else:
+                    import_lines.append(segment)
+            elif isinstance(node, _DEF_NODES):
+                definitions.append(node.name)
+
+        body = _strip_top_level_imports(text, tree).strip("\n")
+        chunk = f"# --- merged from {label} ---\n{body}\n" if body else ""
+        if chunk:
+            body_chunks.append(chunk)
+        merged_files.append(label)
+        if logger is not None:
+            n_defs = sum(1 for n in tree.body if isinstance(n, _DEF_NODES))
+            logger(f"[Ingest     ] Merged AST from {label} ({n_defs} top-level def(s))")
+
+    header = future_lines + import_lines
+    parts: List[str] = []
+    if header:
+        parts.append("\n".join(header) + "\n")
+    parts.extend(body_chunks)
+    merged = "\n".join(parts) if parts else ""
+    return MergedSource(source=merged, files=merged_files, definitions=definitions)
+
+
+def resolve_cross_imports(
+    body_source: str,
+    own_module: str,
+    symbol_to_target: Dict[str, str],
+    *,
+    package_relative: bool = True,
+) -> Tuple[List[str], List[Tuple[str, str]]]:
+    """Compute relative imports a module needs for symbols moved elsewhere.
+
+    Walks ``body_source`` for referenced names; any name that now lives in a
+    *different* generated module is grouped into a clean ``from .module import …``
+    line so the decoupled file does not raise ``NameError`` at runtime.
+
+    Returns ``(import_lines, [(symbol, module_name), …])``.
+    """
+    try:
+        tree = ast.parse(body_source)
+    except SyntaxError:
+        return [], []
+
+    used = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+    prefix = "." if package_relative else ""
+
+    needed: Dict[str, List[str]] = {}
+    pairs: List[Tuple[str, str]] = []
+    for symbol in sorted(used):
+        target = symbol_to_target.get(symbol)
+        if target is None:
+            continue
+        module = target[:-3] if target.endswith(".py") else target
+        own = own_module[:-3] if own_module.endswith(".py") else own_module
+        if module == own:
+            continue  # symbol is defined in this very module
+        needed.setdefault(module, []).append(symbol)
+        pairs.append((symbol, module))
+
+    import_lines = [
+        f"from {prefix}{module} import {', '.join(symbols)}"
+        for module, symbols in needed.items()
+    ]
+    return import_lines, pairs
 
 
 class ModularDecomposer:
@@ -190,7 +314,15 @@ class ModularDecomposer:
                 target_nodes[target].append(node)
                 extracted_ranges.append(self._node_line_range(node))
 
-        header_imports = list(future_imports) + list(top_imports)
+        # De-duplicate while preserving order (matters for merged multi-file
+        # sources where the same import can appear in several inputs).
+        header_imports: List[str] = []
+        _seen_imports: set = set()
+        for line in list(future_imports) + list(top_imports):
+            key = line.strip()
+            if key and key not in _seen_imports:
+                _seen_imports.add(key)
+                header_imports.append(line)
 
         dest_dir.mkdir(parents=True, exist_ok=True)
         modules: List[DecomposedModule] = []
@@ -205,6 +337,7 @@ class ModularDecomposer:
                 nodes=nodes,
                 target=target,
                 dest_dir=dest_dir,
+                symbol_to_target=symbol_to_target,
             )
             (dest_dir / module.filename).write_text(module.source, encoding="utf-8")
             modules.append(module)
@@ -365,6 +498,7 @@ class ModularDecomposer:
         nodes: List[ast.AST],
         target: str,
         dest_dir: Path,
+        symbol_to_target: Dict[str, str],
     ) -> DecomposedModule:
         classes: List[str] = []
         functions: List[str] = []
@@ -384,7 +518,18 @@ class ModularDecomposer:
             )
 
         body_text = "\n\n\n".join(body_segments)
-        import_lines = list(header_imports)
+
+        # Intra-module interlinking: pull in symbols that now live in sibling
+        # generated modules so the decoupled file does not raise NameError.
+        cross_lines, cross_pairs = resolve_cross_imports(
+            body_text, target, symbol_to_target, package_relative=self.package_relative
+        )
+        for symbol, module in cross_pairs:
+            self._log(
+                f"[Interlink  ] {target}: injected 'from .{module} import {symbol}'"
+            )
+
+        import_lines = list(header_imports) + list(cross_lines)
         if self.prune_imports and import_lines:
             import_lines = self._prune_module_imports(
                 import_lines=import_lines,
@@ -408,6 +553,7 @@ class ModularDecomposer:
             classes=classes,
             functions=functions,
             source="\n".join(parts),
+            cross_imports=list(cross_lines),
         )
 
     def _prune_module_imports(
