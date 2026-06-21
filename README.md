@@ -6,6 +6,14 @@ Aero Universal strips away the complex, hyper-specialized configuration overhead
 
 ---
 
+### 💡 The TL;DR
+
+**Ever tried to turn a chaotic, single-file Python/Rust script into a professional, distributed GitHub repository?** Normally, you have to manually configure `Cargo.toml`, set up Python FFI bindings (`pyo3`), break your code into separate modular files, fix compiler version drift, track down dead imports, and configure complex compiler flags.
+
+**Aero Universal does all of this completely automatically.** You point it at any source code file anywhere on your drive via a 10-line configuration blueprint, and it instantly builds, optimizes, prunes, and scaffolds a production-ready, out-of-tree standalone repository.
+
+---
+
 ## 🚀 Key Breakthrough Capabilities
 
 * **The "Invisible" Configuration Layer** – Reduces configuration files down to less than ten lines of pure declarative intent. The engine automatically infers execution DAGs, dependency trees, FFI language boundaries, and self-healing compilation loops directly from project contexts.
@@ -27,6 +35,18 @@ pip install -r requirements.txt
 python main.py build
 
 ```
+
+### ⚙️ System Prerequisites
+
+Because Aero Universal handles native bare-metal compilation and high-precision mathematics (like the `rug` crate), ensure your host system has the following core toolchains installed:
+
+* **Rustup / Cargo** (Latest stable)
+* **Python 3.8+**
+* **System C Libraries** (Required if building arbitrary-precision math modules):
+* *Ubuntu/Debian:* `sudo apt install libgmp-dev libmpfr-dev libmpc-dev`
+* *macOS:* `brew install gmp mpfr libmpc`
+
+
 
 ---
 
@@ -148,29 +168,23 @@ error: unterminated string literal
    |               ^ this string is never closed
    |
    = help: strings cannot span lines; add a closing double quote (")
+
 ```
 
-See [`blueprint.aero.sample`](blueprint.aero.sample) for a complete example.
+See [`blueprint.aero.sample`](https://www.google.com/search?q=blueprint.aero.sample) for a complete example.
 
 ### Rust / Cargo support
 
-Aero respects user‑provided Cargo manifests and supports crates that live in
-subdirectories. The behaviour for a `language = "rust"` target is:
+Aero respects user‑provided Cargo manifests and supports crates that live in subdirectories. The behaviour for a `language = "rust"` target is:
 
-1. **An existing `Cargo.toml` is used verbatim.** If the crate root already has a
-   `Cargo.toml` — discovered from the target's `sources`, or pointed at via
-   `manifest_path` / `root` — Aero builds against it **as‑is** and never
-   synthesises or overwrites it. Builds that pin older dependency APIs keep
-   working.
-2. **Otherwise a manifest is synthesised**, and you can pin dependency versions
-   from the blueprint (see `cargo_dependencies` / the JSON `cargo` block below).
-3. **`cargo` runs from the resolved crate root**, and artefacts are collected
-   from *that* crate's `target/` directory.
+1. **An existing `Cargo.toml` is used verbatim.** If the crate root already has a `Cargo.toml` — discovered from the target's `sources`, or pointed at via `manifest_path` / `root` — Aero builds against it **as‑is** and never synthesises or overwrites it. Builds that pin older dependency APIs keep working.
+2. **Otherwise a manifest is synthesised**, and you can pin dependency versions from the blueprint (see `cargo_dependencies` / the JSON `cargo` block below).
+3. **`cargo` runs from the resolved crate root**, and artefacts are collected from *that* crate's `target/` directory.
 
 **New target fields:**
 
 | Field | Format | Meaning |
-|-------|--------|---------|
+| --- | --- | --- |
 | `root` | string | Subdirectory that is the crate root (e.g. `"crates/foo"`). |
 | `manifest_path` | string | Explicit path to a `Cargo.toml` (or the directory containing it). Its directory becomes the crate root. |
 | `cargo_dependencies` | list of `"name=version"` | Pin dependency versions for a **synthesised** manifest (block‑DSL / INI form). |
@@ -183,6 +197,7 @@ target "engine" {
     sources  = ["crates/engine/src/lib.rs"]
     root     = "crates/engine"          # cargo runs here; its Cargo.toml is honoured
 }
+
 ```
 
 **Block DSL — no manifest yet, pin versions for the synthesised one:**
@@ -193,13 +208,10 @@ target "math" {
     sources            = ["src/lib.rs"]
     cargo_dependencies = ["rug=0.22", "serde=1.0"]
 }
+
 ```
 
-**Richer nested `cargo` block (target metadata).** The Rust backend also accepts
-a nested `cargo` object on a target's metadata, supporting inline‑table specs
-(features), an explicit `edition`, and `crate_type`. This is the form consumed
-by the compiler backend (`src/build/compilers.py`) and is convenient for JSON
-target metadata or programmatic callers of `compile_target(...)`:
+**Richer nested `cargo` block (target metadata).** The Rust backend also accepts a nested `cargo` object on a target's metadata, supporting inline‑table specs (features), an explicit `edition`, and `crate_type`. This is the form consumed by the compiler backend (`src/build/compilers.py`) and is convenient for JSON target metadata or programmatic callers of `compile_target(...)`:
 
 ```json
 {
@@ -215,26 +227,19 @@ target metadata or programmatic callers of `compile_target(...)`:
     }
   }
 }
+
 ```
 
-Both forms feed the same place: `cargo.dependencies` (nested) and
-`cargo_dependencies` (flat `"name=version"` list) are merged into the
-synthesised manifest's `[dependencies]`. Neither is consulted when a
-`Cargo.toml` already exists — that manifest always wins.
+Both forms feed the same place: `cargo.dependencies` (nested) and `cargo_dependencies` (flat `"name=version"` list) are merged into the synthesised manifest's `[dependencies]`. Neither is consulted when a `Cargo.toml` already exists — that manifest always wins.
 
-> Precedence for the crate root: `manifest_path` → `root` → an existing
-> `Cargo.toml` found above the sources → the source directory (its parent if the
-> sources sit in `src/`) → the workspace root. A synthesised manifest carries a
-> header noting that committing your own `Cargo.toml` gives you full control.
+> Precedence for the crate root: `manifest_path` → `root` → an existing `Cargo.toml` found above the sources → the source directory (its parent if the sources sit in `src/`) → the workspace root. A synthesised manifest carries a header noting that committing your own `Cargo.toml` gives you full control.
 
 #### Controlling RUSTFLAGS (portable by default)
 
-Aero injects `RUSTFLAGS` for Rust targets, but **defaults to injecting nothing**
-so builds stay portable across CPUs, CI fleets and cross‑compiles. You opt into
-tuning, or take full control, per target:
+Aero injects `RUSTFLAGS` for Rust targets, but **defaults to injecting nothing** so builds stay portable across CPUs, CI fleets and cross‑compiles. You opt into tuning, or take full control, per target:
 
 | Setting | Effect |
-|---------|--------|
+| --- | --- |
 | *(unset)* | No `RUSTFLAGS` injected — portable. |
 | `optimization = "none"` | Explicitly inject nothing (and pass any host `RUSTFLAGS` through). |
 | `optimization = "generic"` | `-C target-cpu=generic` (portable, still tuned). |
@@ -242,10 +247,7 @@ tuning, or take full control, per target:
 | `optimization = "size"` | `-C opt-level=z`. |
 | `rustflags = ["-C", "target-cpu=generic"]` | Used **verbatim**, overriding `optimization`. |
 
-In zero‑config mode the top‑level `optimize` word feeds this too
-(`optimize = "maximum_hardware"` ⇒ `target-cpu=native`). If a host rejects the
-injected flags (e.g. an unknown `target-cpu`), set `optimization = "none"` or a
-`generic` profile.
+In zero‑config mode the top‑level `optimize` word feeds this too (`optimize = "maximum_hardware"` ⇒ `target-cpu=native`). If a host rejects the injected flags (e.g. an unknown `target-cpu`), set `optimization = "none"` or a `generic` profile.
 
 ```aero
 target "engine" {
@@ -254,12 +256,12 @@ target "engine" {
     root         = "crates/engine"
     optimization = "none"                       # or: rustflags = ["-C", "target-cpu=generic"]
 }
+
 ```
 
 #### Debugging a build
 
-`aero build --debug` prints, per target, exactly what Aero used — so version
-mismatches and RUSTFLAGS surprises are diagnosable at a glance:
+`aero build --debug` prints, per target, exactly what Aero used — so version mismatches and RUSTFLAGS surprises are diagnosable at a glance:
 
 ```text
 [Debug] engine: cargo command: cargo build --manifest-path crates/engine/Cargo.toml
@@ -268,11 +270,10 @@ mismatches and RUSTFLAGS surprises are diagnosable at a glance:
 [Debug] engine: dependencies: rug=0.22
 [Debug] engine: Cargo.toml in use
         [package] …
+
 ```
 
-When a Rust build fails with a *method‑not‑found* error (a classic
-version‑mismatch symptom), Aero appends a root‑cause hypothesis naming the
-**actual version in use**:
+When a Rust build fails with a *method‑not‑found* error (a classic version‑mismatch symptom), Aero appends a root‑cause hypothesis naming the **actual version in use**:
 
 ```text
 Aero Build Failure
@@ -284,41 +285,32 @@ Aero Build Failure
     → crate `rug` in use: 1.24.0 (resolved) — declared as "0.22"
     → check whether `neg_mut` exists in that version of `rug`; if not, pin a compatible
       version, e.g. cargo_dependencies = ["rug=<version>"], then rebuild.
+
 ```
+
+---
 
 ## Standalone Repository Generator
 
-`aero scaffold` turns a **single source file living anywhere on disk** into a
-complete, turn‑key, idiomatic Rust/pyo3 project — generated **outside** the tool
-tree so `aero-universal` stays pristine. It's the zero‑config path for "I have a
-`lib.rs`, give me a repo I can push to GitHub." Implemented in
-[`src/scaffold`](src/scaffold/).
+`aero scaffold` turns a **single source file living anywhere on disk** into a complete, turn‑key, idiomatic Rust/pyo3 project — generated **outside** the tool tree so `aero-universal` stays pristine. It's the zero‑config path for "I have a `lib.rs`, give me a repo I can push to GitHub." Implemented in [`src/scaffold`](https://www.google.com/search?q=src/scaffold/).
 
 ```bash
 # From a file anywhere — no need to move it into the tool directory
-aero scaffold --source-entry /content/lib.rs --distribution-directory ~/out/anyon --verbose
+python main.py scaffold --source-entry /content/lib.rs --distribution-directory ~/out/anyon --verbose
 
 # Or into a throwaway temp dir, and compile it too (with auto-recovery)
-aero scaffold --source-entry ../data/core.rs --build
+python main.py scaffold --source-entry ../data/core.rs --build
+
 ```
 
-**1. Flexible context paths (zero file relocation).** `--source-entry` resolves
-absolute paths (`/content/lib.rs`), relative paths (`../data/core.rs`, `~/x.rs`)
-and plain workspace‑relative paths. The file is **read from its exact location**
-and copied into the transient workspace — it is never moved and the engine never
-raises "source not found" for a file that plainly exists. The `[context]`
-ingestion path gained the same single‑file‑from‑anywhere support.
+**1. Flexible context paths (zero file relocation).** `--source-entry` resolves absolute paths (`/content/lib.rs`), relative paths (`../data/core.rs`, `~/x.rs`) and plain workspace‑relative paths. The file is **read from its exact location** and copied into the transient workspace — it is never moved and the engine never raises "source not found" for a file that plainly exists. The `[context]` ingestion path gained the same single‑file‑from‑anywhere support.
 
-**2. Out‑of‑tree workspace isolation.** Every manifest, directory layout,
-build‑cache stream and `target/` output goes to a **system temp dir**
-(auto‑cleaned) or to your `--distribution-directory` (kept — it's the
-deliverable). A guard *refuses* to materialise a workspace inside the tool tree,
-so a mis‑configured path can never clutter `aero-universal` again.
+**2. Out‑of‑tree workspace isolation.** Every manifest, directory layout, build‑cache stream and `target/` output goes to a **system temp dir** (auto‑cleaned) or to your `--distribution-directory` (kept — it's the deliverable). A guard *refuses* to materialise a workspace inside the tool tree, so a mis‑configured path can never clutter `aero-universal` again.
 
 **3. Complete standalone repository.** The generated folder is turn‑key:
 
 | File | Contents |
-|------|----------|
+| --- | --- |
 | `Cargo.toml` | Inferred metadata + dependencies (`rug`, `pyo3`), `crate-type = ["cdylib"]` for a Python extension module. |
 | `src/lib.rs` | The corrected, **shielded** source. |
 | `.gitignore` | Ignores `target/`, `*.so`, `__pycache__`, … |
@@ -333,39 +325,25 @@ so a mis‑configured path can never clutter `aero-universal` again.
 ├── README.md
 └── test_binding.py
 # push it: cd ~/out/anyon && git init && git add . && git commit -m 'init'
+
 ```
 
-**4. Semantic shields & auto‑error correction.** When the source contains `rug`
-or `pyo3` anchors, Aero applies the API fixes codified from live compile testing
-**during scaffolding**, idempotently:
+**4. Semantic shields & auto‑error correction.** When the source contains `rug` or `pyo3` anchors, Aero applies the API fixes codified from live compile testing **during scaffolding**, idempotently:
 
-- **Hygienic extension‑trait injection** — `neg_mut` / `nth_root` compatibility
-  `impl`s are prepended *after* crate‑level inner attributes (`#![...]`, `//!`)
-  so they never collide with downstream `use` imports.
-- **Type‑cascading alignment** — `let q_dim = match sec { … }` index tables are
-  annotated `let q_dim: usize = match sec { … }` (only when the arms are
-  integer‑like), stopping a single inferred `i32` cascading downstream.
-- **Robust diagnostic recovery** — with `--build`, `cargo build` runs from the
-  generated repo; if it exits `101` on a mutability or type‑mismatch error, the
-  failing `src/lib.rs` is piped through the auto‑correction pass (e.g. `let x` →
-  `let mut x`) and the build is **re‑dispatched once**:
+* **Hygienic extension‑trait injection** — `neg_mut` / `nth_root` compatibility `impl`s are prepended *after* crate‑level inner attributes (`#![...]`, `//!`) so they never collide with downstream `use` imports.
+* **Type‑cascading alignment** — `let q_dim = match sec { … }` index tables are annotated `let q_dim: usize = match sec { … }` (only when the arms are integer‑like), stopping a single inferred `i32` cascading downstream.
+* **Robust diagnostic recovery** — with `--build`, `cargo build` runs from the generated repo; if it exits `101` on a mutability or type‑mismatch error, the failing `src/lib.rs` is piped through the auto‑correction pass (e.g. `let x` → `let mut x`) and the build is **re‑dispatched once**:
 
 ```text
 [scaffold] build: attempt 1 failed (code 101); corrections: mut(acc)
 [scaffold] build: attempt 2 ok
 [scaffold] build: recovered after auto-correction
+
 ```
 
-The subsystem is fully modular — `source_resolver`, `rust_shield`, `workspace`,
-`repo_generator`, `recovery` and the orchestrating `engine` are independently
-usable and tested.
+The subsystem is fully modular — `source_resolver`, `rust_shield`, `workspace`, `repo_generator`, `recovery` and the orchestrating `engine` are independently usable and tested.
 
-**5. Modular decomposition (`decomposition_mode = "modular_package"`).** Instead
-of copying a single Python entry script verbatim, Aero can read a *monolithic*
-script (e.g. our own `main.py`) and break it apart into a multi‑file, highly
-decoupled package — driven entirely by AST analysis. Declare a `module_mapping`
-inside the `[scaffold]` block whose keys are target filenames and whose values
-are the class/function names that should live in each file:
+**5. Modular decomposition (`decomposition_mode = "modular_package"`).** Instead of copying a single Python entry script verbatim, Aero can read a *monolithic* script (e.g. our own `main.py`) and break it apart into a multi‑file, highly decoupled package — driven entirely by AST analysis. Declare a `module_mapping` inside the `[scaffold]` block whose keys are target filenames and whose values are the class/function names that should live in each file:
 
 ```ini
 [scaffold]
@@ -377,38 +355,26 @@ module_mapping      = {
     "cli":      ["main", "create_parser"],
     "shielder": ["RustSemanticShield"]
 }
+
 ```
 
 The `ModularDecomposer` (`src/scaffold/decomposition.py`) then:
 
-- **Extracts** every mapped top‑level `class` / `def` / `async def` (decorators
-  included) from the `source_entry` via `ast`, preserving source order.
-- **Duplicates global imports** (`import os`, `import json`, `from __future__ …`)
-  to the top of every generated module so the decoupled files never break on a
-  missing dependency.
-- **Synthesises the package**: writes each mapped file (`parser.py`, `cli.py`,
-  `shielder.py`), an empty `__init__.py` to make the directory an importable
-  package, and rewrites the root `main.py` into a thin orchestrator that pulls
-  the moved symbols back via package‑relative imports
-  (`from .parser import SchemaValidator`).
+* **Extracts** every mapped top‑level `class` / `def` / `async def` (decorators included) from the `source_entry` via `ast`, preserving source order.
+* **Duplicates global imports** (`import os`, `import json`, `from __future__ …`) to the top of every generated module so the decoupled files never break on a missing dependency.
+* **Synthesises the package**: writes each mapped file (`parser.py`, `cli.py`, `shielder.py`), an empty `__init__.py` to make the directory an importable package, and rewrites the root `main.py` into a thin orchestrator that pulls the moved symbols back via package‑relative imports (`from .parser import SchemaValidator`).
 
 ```text
 [Decomposing] Extracted class 'SchemaValidator' -> ~/out/aero_pkg/parser.py
 [Decomposing] Extracted function 'parse_blueprint' -> ~/out/aero_pkg/parser.py
 [Scaffold   ] Initialized package boundary __init__.py
 [Scaffold   ] Rewrote orchestrator entrypoint ~/out/aero_pkg/main.py
+
 ```
 
-Decomposition is defensive: a name that has no matching definition
-(`MissingASTNodeError`), a symbol mapped to two files (`ImportCollisionError`),
-an empty mapping or an unparseable source all raise a clear `DecompositionError`
-before any file is written incorrectly.
+Decomposition is defensive: a name that has no matching definition (`MissingASTNodeError`), a symbol mapped to two files (`ImportCollisionError`), an empty mapping or an unparseable source all raise a clear `DecompositionError` before any file is written incorrectly.
 
-**6. Static import pruning (`analysis.static_import_pruning`).** Decomposition
-duplicates the monolith's whole top-level import block into every generated file.
-Most of those imports are dead weight in any single module. The pruner
-(`src/scaffold/import_pruner.py`) eliminates them with a pure-`ast` pass, **per
-file, before it is written to disk** — zero code bloat, no third-party deps.
+**6. Static import pruning (`analysis.static_import_pruning`).** Decomposition duplicates the monolith's whole top-level import block into every generated file. Most of those imports are dead weight in any single module. The pruner (`src/scaffold/import_pruner.py`) eliminates them with a pure-`ast` pass, **per file, before it is written to disk** — zero code bloat, no third-party deps.
 
 Enable it from the `analysis` block of `blueprint.aero`:
 
@@ -419,48 +385,33 @@ Enable it from the `analysis` block of `blueprint.aero`:
     "static_import_pruning": true,
     "macro_expansion": "pass_through"
 }
+
 ```
 
-`prune_dead_imports(module_ast)` collects every name bound by `ast.Import` /
-`ast.ImportFrom` (honouring `as` aliases; `import os.path` binds `os`), walks the
-rest of the module collecting used `ast.Name` tokens, and strips any import whose
-bound name never appears. Unused aliases on a multi-name line are dropped
-individually (`from typing import Any, Dict` → `from typing import Dict`).
+`prune_dead_imports(module_ast)` collects every name bound by `ast.Import` / `ast.ImportFrom` (honouring `as` aliases; `import os.path` binds `os`), walks the rest of the module collecting used `ast.Name` tokens, and strips any import whose bound name never appears. Unused aliases on a multi-name line are dropped individually (`from typing import Any, Dict` → `from typing import Dict`).
 
 It is deliberately conservative — it never removes an import it cannot prove dead:
 
-- `from __future__` and `*` star-imports are always kept.
-- A name that also appears as an identifier inside a **string literal** is treated
-  as used (it may be looked up dynamically) and kept.
-- If a module touches `sys.modules` / `importlib.import_module` / `__import__` /
-  `eval` / `exec` / `globals` / `vars`, pruning is **suppressed for the whole
-  module** — dynamic lookups can reference any import by string.
+* `from __future__` and `*` star-imports are always kept.
+* A name that also appears as an identifier inside a **string literal** is treated as used (it may be looked up dynamically) and kept.
+* If a module touches `sys.modules` / `importlib.import_module` / `__import__` / `eval` / `exec` / `globals` / `vars`, pruning is **suppressed for the whole module** — dynamic lookups can reference any import by string.
 
 ```text
 [Optimize   ] Pruned unused 'os' import from parser.py
 [Optimize   ] parser.py: pruned 1 import(s), saved 10 byte(s)
 [Optimize   ] Pruned unused 'json' import from utils.py
 [Optimize   ] utils.py: pruned 1 import(s), saved 12 byte(s)
+
 ```
 
-**7. Intra-module interlinking (cross-module calls).** When the monolith is split,
-code in `cli.py` may call a class that was moved to `parser.py` — a latent
-`NameError`. `resolve_cross_imports()` walks each generated module's body, and for
-every referenced symbol that now lives in a *sibling* module it injects a clean
-relative import at the top of the file. The injected lines are real usages, so the
-import pruner never strips them.
+**7. Intra-module interlinking (cross-module calls).** When the monolith is split, code in `cli.py` may call a class that was moved to `parser.py` — a latent `NameError`. `resolve_cross_imports()` walks each generated module's body, and for every referenced symbol that now lives in a *sibling* module it injects a clean relative import at the top of the file. The injected lines are real usages, so the import pruner never strips them.
 
 ```text
 [Interlink  ] cli.py: injected 'from .parser import BlueprintParser'
+
 ```
 
-**8. Multi-file source ingestion matrix.** Both `scaffold.source_entry` (and
-`context.source_entry`) accept either a single absolute path **or a list** of
-paths. When a list is given, `merge_source_asts()` parses and merges every file's
-AST in-memory — hoisting and de-duplicating imports (`from __future__` first) and
-concatenating the remaining bodies under provenance banners — into a single
-structural schema *before* the `modular_package` cuts run. The merged orchestrator
-is emitted as `main.py`.
+**8. Multi-file source ingestion matrix.** Both `scaffold.source_entry` (and `context.source_entry`) accept either a single absolute path **or a list** of paths. When a list is given, `merge_source_asts()` parses and merges every file's AST in-memory — hoisting and de-duplicating imports (`from __future__` first) and concatenating the remaining bodies under provenance banners — into a single structural schema *before* the `modular_package` cuts run. The merged orchestrator is emitted as `main.py`.
 
 ```json
 "scaffold": {
@@ -468,32 +419,29 @@ is emitted as `main.py`.
     "decomposition_mode": "modular_package",
     "module_mapping": { "parser": ["BlueprintParser"], "cli": ["main"] }
 }
+
 ```
 
 ```text
 [Ingest     ] Merged AST from core.py (1 top-level def(s))
 [Ingest     ] Merged AST from utils.py (2 top-level def(s))
+
 ```
 
-**9. Autonomous self-testing suite scaffolding (`validation.generate_test_shims`).**
-When enabled, `generate_test_matrix()` writes an independent `tests/` directory
-into the distribution root so the generated repo is provably operational:
+**9. Autonomous self-testing suite scaffolding (`validation.generate_test_shims`).** When enabled, `generate_test_matrix()` writes an independent `tests/` directory into the distribution root so the generated repo is provably operational:
 
-- **Python** → `tests/test_package_loading.py` — resolves its own package from
-  `__file__` and imports every generated submodule through the `__init__.py`
-  gateway, catching and reporting any import-time failure. Runs both as
-  `python -m <pkg>.tests.test_package_loading` and as a plain script.
-- **Rust** → `tests/binding_validation.rs` — a standard `#[cfg(test)]` integration
-  loop confirming the crate links and loads.
+* **Python** → `tests/test_package_loading.py` — resolves its own package from `__file__` and imports every generated submodule through the `__init__.py` gateway, catching and reporting any import-time failure. Runs both as `python -m <pkg>.tests.test_package_loading` and as a plain script.
+* **Rust** → `tests/binding_validation.rs` — a standard `#[cfg(test)]` integration loop confirming the crate links and loads.
 
 ```text
 [TestMatrix ] Provisioned self-test folder ~/out/aero_pkg/tests
 [TestMatrix ] Wrote tests/test_package_loading.py (verifies 2 submodule import(s))
+
 ```
 
 ### INI Format (Legacy)
 
-For legacy projects, the INI format is still supported. See the original [README](README_legacy.md) for details.
+For legacy projects, the INI format is still supported. See the original [README](https://www.google.com/search?q=README_legacy.md) for details.
 
 ---
 
@@ -502,10 +450,10 @@ For legacy projects, the INI format is still supported. See the original [README
 The universal `main.py` entry point handles your entire workflow through highly descriptive subcommands:
 
 | Command | Description |
-|---------|-------------|
+| --- | --- |
 | `build` | Full build pipeline (scanner → decision tree → tuner → compiler) |
 | `check` | Strictly validate a block‑DSL `blueprint.aero` (no build) |
-| `infer` | Infer the full execution DAG from an ultra‑lean blueprint (see [Invisible Configuration Layer](#1-the-invisible-configuration-layer-under-10-lines)) |
+| `infer` | Infer the full execution DAG from an ultra‑lean blueprint (see [Invisible Configuration Layer](https://www.google.com/search?q=%231-the-invisible-configuration-layer-under-10-lines)) |
 | `ingest` | Ingest external source trees, repair code, and integrate into the workspace |
 | `evolve` | Run only the evolutionary optimisation loop (without full build) |
 | `analyze` | Perform semantic analysis and generate UAST graph |
@@ -519,15 +467,15 @@ The universal `main.py` entry point handles your entire workflow through highly 
 | `validate` | Run the validation suite and report results |
 | `runtime` | Execute runtime benchmarks and feed back into fitness |
 | `invariants` | Ingest unstructured context + code into the domain‑agnostic Invariant Schema |
-| `polymorphize` | Inspect the host and polymorphically rewrite generated code for it (see [Autonomous Hardware-Polymerization](#autonomous-hardware-polymerization)) |
-| `scaffold` | Generate a turn‑key standalone repo from a source file, out‑of‑tree (see [Standalone Repository Generator](#standalone-repository-generator)) |
+| `polymorphize` | Inspect the host and polymorphically rewrite generated code for it (see [Autonomous Hardware-Polymerization](https://www.google.com/search?q=%23autonomous-hardware-polymerization)) |
+| `scaffold` | Generate a turn‑key standalone repo from a source file, out‑of‑tree (see [Standalone Repository Generator](https://www.google.com/search?q=%23standalone-repository-generator)) |
 
 ### Common Options
 
-- `--workspace <path>` – root directory containing `blueprint.aero` (default: `.`)
-- `--config <path>` – explicit path to blueprint file (JSON or INI)
-- `--verbose` – enable debug logging
-- `--cycles <n>` – number of build cycles (for iterative improvement)
+* `--workspace <path>` – root directory containing `blueprint.aero` (default: `.`)
+* `--config <path>` – explicit path to blueprint file (JSON or INI)
+* `--verbose` – enable debug logging
+* `--cycles <n>` – number of build cycles (for iterative improvement)
 
 ---
 
