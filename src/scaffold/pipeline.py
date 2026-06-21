@@ -104,6 +104,8 @@ class ScaffoldBuildPipeline:
         module_mapping = dict(cfg.get("module_mapping") or {})
         decomposition_mode = str(cfg.get("decomposition_mode", "")).strip() or None
         modular = decomposition_mode == "modular_package" and bool(module_mapping)
+        analysis = context.get("analysis") if isinstance(context.get("analysis"), dict) else {}
+        prune_imports = bool(analysis.get("static_import_pruning"))
 
         # Step 1 — resolve paths and route by blueprint language.
         self._step(
@@ -149,11 +151,13 @@ class ScaffoldBuildPipeline:
             )
 
         if modular:
+            prune_note = " + static import pruning" if prune_imports else ""
             self._step(
                 4,
                 "SYNTHESIZE FULL REPOSITORY WORKSPACE",
                 "decomposition_mode=modular_package — AST-split into "
-                f"{', '.join(sorted(module_mapping))} + __init__.py + orchestrator",
+                f"{', '.join(sorted(module_mapping))} + __init__.py + orchestrator"
+                f"{prune_note}",
             )
         else:
             self._step(
@@ -180,6 +184,7 @@ class ScaffoldBuildPipeline:
                 language=language,
                 module_mapping=module_mapping or None,
                 decomposition_mode=decomposition_mode,
+                prune_imports=prune_imports,
             )
         except WorkspaceLocationError as exc:
             raise WorkspaceLocationError(f"Step 3 failed — {exc}") from exc

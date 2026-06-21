@@ -25,6 +25,7 @@ from src.scaffold.decomposition import (
     ModularDecomposer,
 )
 from src.scaffold.engine import ScaffoldEngine, ScaffoldResult
+from src.scaffold.import_pruner import PruneOutcome, prune_dead_imports, render_imports
 from src.scaffold.language_router import resolve_target_language
 from src.scaffold.pipeline import (
     PipelineResult,
@@ -79,6 +80,9 @@ __all__ = [
     "DecompositionError",
     "MissingASTNodeError",
     "ImportCollisionError",
+    "prune_dead_imports",
+    "render_imports",
+    "PruneOutcome",
 ]
 
 __version__ = "1.0.0"

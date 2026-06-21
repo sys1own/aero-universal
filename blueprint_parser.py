@@ -24,6 +24,10 @@ _REQUIRED_SECTIONS = ("graph", "compiler", "cortex")
 # (default) means "no decomposition" — copy/optimize the single source entry.
 _SUPPORTED_DECOMPOSITION_MODES = frozenset({"modular_package"})
 
+# Boolean optimization toggles in the [analysis] block.  Unknown keys inside the
+# block are preserved untouched; these are merely coerced/validated.
+_ANALYSIS_BOOL_FLAGS = ("dead_code_elimination", "static_import_pruning")
+
 # Optional sections introduced for large-scale physics simulation builds.
 # They are fully backward compatible: a blueprint that omits them behaves
 # exactly as before, falling back to the conservative defaults below.
@@ -102,6 +106,12 @@ def _default_optional_sections() -> Dict[str, Dict[str, Any]]:
             "feedback_weight": 0.3,
         },
         "frameworks": {"language": ""},
+        "analysis": {
+            "ast_scanning": "pass_through",
+            "dead_code_elimination": False,
+            "static_import_pruning": False,
+            "macro_expansion": "pass_through",
+        },
         "validation": {
             "suite": "",
             "tolerance": 1e-8,
@@ -125,6 +135,28 @@ def _default_optional_sections() -> Dict[str, Dict[str, Any]]:
 
 class BlueprintParseError(ValueError):
     """Raised when blueprint parsing or validation fails."""
+
+
+def normalize_analysis_block(analysis: Any) -> Dict[str, Any]:
+    """Validate + default the ``[analysis]`` block, preserving unknown keys.
+
+    Coerces the boolean optimization toggles (``dead_code_elimination``,
+    ``static_import_pruning``) and keeps string knobs such as ``ast_scanning`` /
+    ``macro_expansion`` as-is.  Absent flags fall back to the conservative
+    defaults so legacy blueprints behave exactly as before.
+    """
+    if not isinstance(analysis, dict):
+        raise BlueprintParseError("[analysis] must be a JSON object")
+    merged: Dict[str, Any] = dict(_default_optional_sections()["analysis"])
+    merged.update(analysis)
+    for flag in _ANALYSIS_BOOL_FLAGS:
+        if flag in analysis:
+            merged[flag] = _as_bool("analysis", flag, analysis[flag])
+    if "ast_scanning" in analysis:
+        merged["ast_scanning"] = str(analysis["ast_scanning"]).strip()
+    if "macro_expansion" in analysis:
+        merged["macro_expansion"] = str(analysis["macro_expansion"]).strip()
+    return merged
 
 
 def load_stable_manifest(manifest_path: str = _MANIFEST_PATH) -> Dict[str, Any]:
@@ -552,6 +584,11 @@ def normalize_optional_sections(sections: Dict[str, Dict[str, Any]]) -> Dict[str
         else:
             raise BlueprintParseError("[context] must be a JSON object or list")
 
+    # --- [analysis] --------------------------------------------------
+    analysis = sections.get("analysis")
+    if analysis is not None:
+        normalized["analysis"] = normalize_analysis_block(analysis)
+
     # --- [scaffold] --------------------------------------------------
     scaffold = sections.get("scaffold")
     if isinstance(scaffold, dict):
@@ -643,6 +680,10 @@ def parse_json_blueprint(content: str) -> Dict[str, Any]:
     # clobbering sections the user provided.
     for key, default in _default_optional_sections().items():
         context.setdefault(key, default)
+
+    # Validate + normalise the analysis optimization toggles (preserving any
+    # unknown keys the user declared inside the block).
+    context["analysis"] = normalize_analysis_block(context.get("analysis", {}))
 
     context["workspace_status"] = "stable_active"
     context["blueprint_format"] = "json"
